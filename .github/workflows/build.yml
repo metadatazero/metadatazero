@@ -79,12 +79,20 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Clean old bundles (macOS Intel)
+        if: matrix.platform == 'macos-latest'
+        run: rm -rf src-tauri/target/x86_64-apple-darwin/release/bundle
+
       - name: Build the app (macOS Intel)
         if: matrix.platform == 'macos-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target x86_64-apple-darwin
+
+      - name: Clean old bundles (macOS ARM)
+        if: matrix.platform == 'macos-latest'
+        run: rm -rf src-tauri/target/aarch64-apple-darwin/release/bundle
 
       - name: Build the app (macOS ARM)
         if: matrix.platform == 'macos-latest'
@@ -104,6 +112,14 @@ jobs:
         run: |
           node scripts/generate-updater-json.mjs darwin x86_64-apple-darwin
           node scripts/generate-updater-json.mjs darwin aarch64-apple-darwin
+
+      - name: Clean old bundles (Linux)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: rm -rf src-tauri/target/release/bundle
+
+      - name: Clean old bundles (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: Remove-Item -Recurse -Force src-tauri/target/release/bundle -ErrorAction SilentlyContinue
 
       - name: Build the app (Linux/Windows)
         if: matrix.platform != 'macos-latest'
