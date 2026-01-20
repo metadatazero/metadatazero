@@ -117,7 +117,7 @@ For the complete list of supported file types with technical details, see [ExifT
 
 - **Node.js** v24+
 - **npm** 11+
-- **Rust and Cargo** 1.77.2+
+- **Rust and Cargo** 1.83+
 - **Platform-specific requirements:**
   - macOS: Xcode Command Line Tools
   - Linux: Development libraries (webkit2gtk, libssl-dev, etc.)
