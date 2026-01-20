@@ -55,7 +55,8 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            rpm
 
       - name: Cache cargo registry
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -151,6 +152,7 @@ jobs:
           name: linux-artifacts
           path: |
             src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/appimage/*.AppImage.sig
 

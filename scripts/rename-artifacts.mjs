@@ -61,10 +61,12 @@ function renameLinux() {
 
   const appimageDir = path.join(basePath, 'appimage');
   const debDir = path.join(basePath, 'deb');
+  const rpmDir = path.join(basePath, 'rpm');
 
   renameFile(appimageDir, `MetadataZero_${version}_amd64.AppImage`, `MetadataZero-${version}-linux-x64.AppImage`);
   renameFile(appimageDir, `MetadataZero_${version}_amd64.AppImage.sig`, `MetadataZero-${version}-linux-x64.AppImage.sig`);
   renameFile(debDir, `MetadataZero_${version}_amd64.deb`, `MetadataZero-${version}-linux-x64.deb`);
+  renameFile(rpmDir, `MetadataZero-${version}-1.x86_64.rpm`, `MetadataZero-${version}-linux-x64.rpm`);
 }
 
 function renameWindows() {
