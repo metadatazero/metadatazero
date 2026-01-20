@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
@@ -308,6 +309,16 @@ function App() {
     setSelectedFile(null);
   };
 
+  const handleBrowseFiles = async () => {
+    const selected = await open({
+      multiple: true,
+    });
+    if (selected) {
+      const paths = Array.isArray(selected) ? selected : [selected];
+      handleFiles(paths);
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -319,14 +330,14 @@ function App() {
 
       <main className="main">
         {files.length === 0 ? (
-          <div className={`drop-zone ${dragActive ? "active" : ""}`}>
+          <div className={`drop-zone ${dragActive ? "active" : ""}`} onClick={handleBrowseFiles}>
             <div className="drop-zone-content">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-              <h2>Drop files here</h2>
+              <h2>Drop files here or click to browse</h2>
               <p>Supports images, videos, and PDF files</p>
             </div>
           </div>
