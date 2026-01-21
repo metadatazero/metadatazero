@@ -86,7 +86,7 @@ interface PreservationOptions {
 }
 
 interface AppSettings {
-  autoUpdate: boolean;
+  autoUpdate: boolean | null;
 }
 
 function App() {
@@ -120,16 +120,15 @@ function App() {
     const saved = localStorage.getItem('appSettings');
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch {
+        const parsed = JSON.parse(saved);
         return {
-          autoUpdate: true,
+          autoUpdate: parsed.autoUpdate ?? null,
         };
+      } catch {
+        return { autoUpdate: null };
       }
     }
-    return {
-      autoUpdate: true,
-    };
+    return { autoUpdate: null };
   });
 
   useEffect(() => {
@@ -490,13 +489,8 @@ function App() {
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
-                    checked={appSettings.autoUpdate}
-                    onChange={(e) =>
-                      setAppSettings((prev) => ({
-                        ...prev,
-                        autoUpdate: e.target.checked,
-                      }))
-                    }
+                    checked={appSettings.autoUpdate === true}
+                    onChange={(e) => setAppSettings({ autoUpdate: e.target.checked })}
                   />
                   <div className="checkbox-content">
                     <span className="checkbox-title">Auto Update</span>
@@ -510,6 +504,38 @@ function App() {
             <div className="modal-footer">
               <button className="btn-primary" onClick={() => setShowSettings(false)}>
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {appSettings.autoUpdate === null && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h2>Enable automatic updates?</h2>
+            </div>
+            <div className="modal-content">
+              <p className="modal-description">
+                This feature makes background network requests.
+              </p>
+              <p className="modal-description modal-description-secondary">
+                You can change this setting later in the Settings menu.
+              </p>
+            </div>
+            <div className="modal-footer modal-footer-buttons">
+              <button
+                className="btn-secondary"
+                onClick={() => setAppSettings({ autoUpdate: false })}
+              >
+                No thanks
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => setAppSettings({ autoUpdate: true })}
+              >
+                Enable
               </button>
             </div>
           </div>

@@ -495,6 +495,10 @@ button:active:not(:disabled) {
   line-height: 1.5;
 }
 
+.modal-description-secondary {
+  margin-top: 8px;
+}
+
 .settings-section-title {
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
@@ -571,6 +575,10 @@ button:active:not(:disabled) {
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
+}
+
+.modal-footer-buttons {
+  gap: 8px;
 }
 
 @media (prefers-color-scheme: dark) {
