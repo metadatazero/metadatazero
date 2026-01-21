@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,8 +57,7 @@ function downloadWindows() {
   const extractBaseDir = path.join(BINARIES_DIR, `exiftool-${EXIFTOOL_VERSION}_64`);
 
   try {
-    execSync(
-      `curl -L -o "${zipFile}" "https://sourceforge.net/projects/exiftool/files/exiftool-${EXIFTOOL_VERSION}_64.zip/download"`,
+    spawnSync('curl', ['-L', '-o', zipFile, `https://sourceforge.net/projects/exiftool/files/exiftool-${EXIFTOOL_VERSION}_64.zip/download`],
       { stdio: 'inherit', cwd: BINARIES_DIR }
     );
 
@@ -66,8 +65,7 @@ function downloadWindows() {
 
     const destExiftool = path.join(BINARIES_DIR, 'exiftool-x86_64-pc-windows-msvc.exe');
 
-    execSync(
-      `unzip -q "${zipFile}" -d "${BINARIES_DIR}"`,
+    spawnSync('unzip', ['-q', zipFile, '-d', BINARIES_DIR],
       { cwd: BINARIES_DIR }
     );
 
@@ -82,14 +80,14 @@ function downloadWindows() {
     }
 
     if (fs.existsSync(sourceExiftoolFiles)) {
-      execSync(`cp -r "${sourceExiftoolFiles}" "${destExiftoolFiles}"`);
-      execSync(`chmod -R u+w "${destExiftoolFiles}"`);
+      fs.cpSync(sourceExiftoolFiles, destExiftoolFiles, { recursive: true });
+      spawnSync('chmod', ['-R', 'u+w', destExiftoolFiles]);
     }
 
     fs.rmSync(zipFile, { force: true });
 
     if (fs.existsSync(extractBaseDir)) {
-      execSync(`chmod -R +w "${extractBaseDir}"`);
+      spawnSync('chmod', ['-R', '+w', extractBaseDir]);
       fs.rmSync(extractBaseDir, { recursive: true, force: true });
     }
 
@@ -107,14 +105,13 @@ function downloadAndSetup() {
   const extractDir = path.join(BINARIES_DIR, `exiftool-${EXIFTOOL_VERSION}`);
 
   try {
-    execSync(
-      `curl -L -o "${tarFile}" "https://github.com/exiftool/exiftool/archive/refs/tags/${EXIFTOOL_VERSION}.tar.gz"`,
+    spawnSync('curl', ['-L', '-o', tarFile, `https://github.com/exiftool/exiftool/archive/refs/tags/${EXIFTOOL_VERSION}.tar.gz`],
       { stdio: 'inherit', cwd: BINARIES_DIR }
     );
 
     verifySHA256(tarFile, EXIFTOOL_SHA256);
 
-    execSync(`tar -xzf "${tarFile}"`, { cwd: BINARIES_DIR });
+    spawnSync('tar', ['-xzf', tarFile], { cwd: BINARIES_DIR });
 
     const sourceExiftool = path.join(extractDir, 'exiftool');
     const platforms = [
@@ -135,7 +132,7 @@ function downloadAndSetup() {
     if (fs.existsSync(destLib)) {
       fs.rmSync(destLib, { recursive: true, force: true });
     }
-    execSync(`cp -r "${sourceLib}" "${destLib}"`);
+    fs.cpSync(sourceLib, destLib, { recursive: true });
 
     fs.rmSync(tarFile, { force: true });
     fs.rmSync(extractDir, { recursive: true, force: true });
