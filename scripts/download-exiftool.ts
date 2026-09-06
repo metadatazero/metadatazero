@@ -2,21 +2,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import {
+  BINARIES_DIR,
+  EXIFTOOL_SHA256,
+  EXIFTOOL_VERSION,
+  EXIFTOOL_WINDOWS_SHA256,
+  LIB_DIR,
+  WINDOWS_FILES_DIR,
+  hostSidecarPath,
+  isPacked,
+  isWindows,
+} from './exiftool-host.ts';
 
-const EXIFTOOL_VERSION = '13.36';
-const EXIFTOOL_SHA256 = 'f70ecbcdccc18268d4d3c290faf8cf73b1cf128e3e7f8671e24d6604cae4dc73';
-const EXIFTOOL_WINDOWS_SHA256 = '6e2ba32f10883aec180f71cf257fd8ac7d4a9d12f7c23e0a965f6f4b7fa7d0e9';
-const BINARIES_DIR = path.join(import.meta.dirname, '..', 'src-tauri', 'binaries');
+function run(command: string, args: string[]): void {
+  const result = spawnSync(command, args, { stdio: 'inherit', cwd: BINARIES_DIR });
+
+  if (result.error || result.status !== 0) {
+    throw new Error(`${command} failed: ${result.error?.message ?? `exit ${result.status}`}`);
+  }
+}
 
 function verifySHA256(filePath: string, expectedHash: string): void {
-  const fileBuffer = fs.readFileSync(filePath);
-  const hash = crypto.createHash('sha256');
-  hash.update(fileBuffer);
-  const actualHash = hash.digest('hex');
+  const actualHash = crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 
   if (actualHash !== expectedHash) {
     throw new Error(
-      `Checksum verification failed!\n` +
+      `Checksum verification failed for ${path.basename(filePath)}!\n` +
       `  Expected: ${expectedHash}\n` +
       `  Actual:   ${actualHash}`
     );
@@ -25,132 +36,69 @@ function verifySHA256(filePath: string, expectedHash: string): void {
   console.log('✓ Checksum verified');
 }
 
-function checkBinaries(): boolean {
-  const requiredBinaries = [
-    'exiftool-x86_64-apple-darwin',
-    'exiftool-aarch64-apple-darwin',
-    'exiftool-x86_64-unknown-linux-gnu',
-    'exiftool-aarch64-unknown-linux-gnu',
-    'exiftool-x86_64-pc-windows-msvc.exe'
-  ];
-
-  const libDir = path.join(BINARIES_DIR, 'lib');
-  const exiftoolFilesDir = path.join(BINARIES_DIR, 'exiftool_files');
-
-  const allExist = requiredBinaries.every((bin: string) =>
-    fs.existsSync(path.join(BINARIES_DIR, bin))
-  ) && fs.existsSync(libDir) && fs.existsSync(exiftoolFilesDir);
-
-  return allExist;
-}
-
 function downloadWindows(): void {
   console.log(`Downloading ExifTool ${EXIFTOOL_VERSION} for Windows...`);
 
   const zipFile = path.join(BINARIES_DIR, 'exiftool-windows.zip');
   const extractBaseDir = path.join(BINARIES_DIR, `exiftool-${EXIFTOOL_VERSION}_64`);
 
-  try {
-    spawnSync('curl', ['-L', '-o', zipFile, `https://sourceforge.net/projects/exiftool/files/exiftool-${EXIFTOOL_VERSION}_64.zip/download`],
-      { stdio: 'inherit', cwd: BINARIES_DIR }
-    );
+  run('curl', ['-fL', '-o', zipFile, `https://sourceforge.net/projects/exiftool/files/exiftool-${EXIFTOOL_VERSION}_64.zip/download`]);
+  verifySHA256(zipFile, EXIFTOOL_WINDOWS_SHA256);
+  run('unzip', ['-q', '-o', zipFile, '-d', BINARIES_DIR]);
 
-    verifySHA256(zipFile, EXIFTOOL_WINDOWS_SHA256);
+  fs.renameSync(path.join(extractBaseDir, 'exiftool(-k).exe'), hostSidecarPath());
 
-    const destExiftool = path.join(BINARIES_DIR, 'exiftool-x86_64-pc-windows-msvc.exe');
-
-    spawnSync('unzip', ['-q', zipFile, '-d', BINARIES_DIR],
-      { cwd: BINARIES_DIR }
-    );
-
-    const extractedFile = path.join(extractBaseDir, 'exiftool(-k).exe');
-    fs.renameSync(extractedFile, destExiftool);
-
-    const sourceExiftoolFiles = path.join(extractBaseDir, 'exiftool_files');
-    const destExiftoolFiles = path.join(BINARIES_DIR, 'exiftool_files');
-
-    if (fs.existsSync(destExiftoolFiles)) {
-      fs.rmSync(destExiftoolFiles, { recursive: true, force: true });
-    }
-
-    if (fs.existsSync(sourceExiftoolFiles)) {
-      fs.cpSync(sourceExiftoolFiles, destExiftoolFiles, { recursive: true });
-      spawnSync('chmod', ['-R', 'u+w', destExiftoolFiles]);
-    }
-
-    fs.rmSync(zipFile, { force: true });
-
-    if (fs.existsSync(extractBaseDir)) {
-      spawnSync('chmod', ['-R', '+w', extractBaseDir]);
-      fs.rmSync(extractBaseDir, { recursive: true, force: true });
-    }
-
-    console.log('✓ ExifTool Windows binary downloaded and configured');
-  } catch (err) {
-    console.error('Failed to download ExifTool for Windows:', (err as Error).message);
-    process.exit(1);
+  fs.rmSync(WINDOWS_FILES_DIR, { recursive: true, force: true });
+  fs.cpSync(path.join(extractBaseDir, 'exiftool_files'), WINDOWS_FILES_DIR, { recursive: true });
+  // The zip marks these files read-only, so Windows refuses to overwrite the copies
+  // the build makes of them and the installed files are read-only too.
+  for (const entry of fs.readdirSync(WINDOWS_FILES_DIR, { recursive: true, withFileTypes: true })) {
+    fs.chmodSync(path.join(entry.parentPath, entry.name), 0o755);
   }
+
+  fs.rmSync(zipFile, { force: true });
+  fs.rmSync(extractBaseDir, { recursive: true, force: true });
+
+  console.log('✓ ExifTool Windows binary ready');
 }
 
-function downloadAndSetup(): void {
+function downloadUnix(): void {
   console.log(`Downloading ExifTool ${EXIFTOOL_VERSION}...`);
 
   const tarFile = path.join(BINARIES_DIR, 'exiftool.tar.gz');
   const extractDir = path.join(BINARIES_DIR, `exiftool-${EXIFTOOL_VERSION}`);
 
+  run('curl', ['-fL', '-o', tarFile, `https://github.com/exiftool/exiftool/archive/refs/tags/${EXIFTOOL_VERSION}.tar.gz`]);
+  verifySHA256(tarFile, EXIFTOOL_SHA256);
+  run('tar', ['-xzf', tarFile]);
+
+  fs.copyFileSync(path.join(extractDir, 'exiftool'), hostSidecarPath());
+  fs.chmodSync(hostSidecarPath(), 0o755);
+
+  fs.rmSync(LIB_DIR, { recursive: true, force: true });
+  fs.cpSync(path.join(extractDir, 'lib'), LIB_DIR, { recursive: true });
+
+  fs.rmSync(tarFile, { force: true });
+  fs.rmSync(extractDir, { recursive: true, force: true });
+
+  console.log(`✓ ExifTool ${EXIFTOOL_VERSION} ready at ${path.basename(hostSidecarPath())}`);
+}
+
+function isConfigured(): boolean {
+  if (isPacked()) return !isWindows() || fs.existsSync(WINDOWS_FILES_DIR);
+  return fs.existsSync(hostSidecarPath()) && fs.existsSync(LIB_DIR);
+}
+
+fs.mkdirSync(BINARIES_DIR, { recursive: true });
+
+if (isConfigured()) {
+  console.log('✓ ExifTool already configured');
+} else {
   try {
-    spawnSync('curl', ['-L', '-o', tarFile, `https://github.com/exiftool/exiftool/archive/refs/tags/${EXIFTOOL_VERSION}.tar.gz`],
-      { stdio: 'inherit', cwd: BINARIES_DIR }
-    );
-
-    verifySHA256(tarFile, EXIFTOOL_SHA256);
-
-    spawnSync('tar', ['-xzf', tarFile], { cwd: BINARIES_DIR });
-
-    const sourceExiftool = path.join(extractDir, 'exiftool');
-    const platforms = [
-      'exiftool-x86_64-apple-darwin',
-      'exiftool-aarch64-apple-darwin',
-      'exiftool-x86_64-unknown-linux-gnu',
-      'exiftool-aarch64-unknown-linux-gnu'
-    ];
-
-    platforms.forEach((target: string) => {
-      const dest = path.join(BINARIES_DIR, target);
-      fs.copyFileSync(sourceExiftool, dest);
-      fs.chmodSync(dest, 0o755);
-    });
-
-    const sourceLib = path.join(extractDir, 'lib');
-    const destLib = path.join(BINARIES_DIR, 'lib');
-    if (fs.existsSync(destLib)) {
-      fs.rmSync(destLib, { recursive: true, force: true });
-    }
-    fs.cpSync(sourceLib, destLib, { recursive: true });
-
-    fs.rmSync(tarFile, { force: true });
-    fs.rmSync(extractDir, { recursive: true, force: true });
-
-    console.log(`✓ ExifTool ${EXIFTOOL_VERSION} Unix binaries configured`);
-
-    downloadWindows();
+    if (isWindows()) downloadWindows();
+    else downloadUnix();
   } catch (err) {
     console.error('Failed to download ExifTool:', (err as Error).message);
     process.exit(1);
   }
 }
-
-function main(): void {
-  if (!fs.existsSync(BINARIES_DIR)) {
-    fs.mkdirSync(BINARIES_DIR, { recursive: true });
-  }
-
-  if (checkBinaries()) {
-    console.log('✓ ExifTool binaries already configured');
-    return;
-  }
-
-  downloadAndSetup();
-}
-
-main();

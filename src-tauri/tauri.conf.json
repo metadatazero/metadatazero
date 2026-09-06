@@ -33,7 +33,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["binaries/*", "binaries/lib/**/*", "binaries/exiftool_files/**/*"],
+    "resources": ["binaries/**/*"],
     "externalBin": ["binaries/exiftool"],
     "createUpdaterArtifacts": true
   },
