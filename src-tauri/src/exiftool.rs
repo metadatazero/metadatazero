@@ -43,12 +43,8 @@ impl ExifToolWrapper {
             } else {
                 "exiftool-x86_64-unknown-linux-gnu"
             }
-        } else if cfg!(target_os = "windows") {
-            if cfg!(target_arch = "aarch64") {
-                "exiftool-aarch64-pc-windows-msvc.exe"
-            } else {
-                "exiftool-x86_64-pc-windows-msvc.exe"
-            }
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            "exiftool-x86_64-pc-windows-msvc.exe"
         } else {
             return Err("Unsupported platform".to_string());
         };

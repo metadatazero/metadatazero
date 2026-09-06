@@ -61,7 +61,7 @@ MetadataZero is available for macOS, Windows, and Linux.
 | Platform | File Type | Important Notes |
 |---------|-----------|----------------|
 | **macOS** | `.dmg` / `.app` | **Unsigned. Gatekeeper will block it.** To run it: `xattr -dr com.apple.quarantine /Applications/MetadataZero.app` |
-| **Windows** | `.exe` | **Unsigned.** Windows SmartScreen will warn. Click “Run anyway.” |
+| **Windows** | `.exe` / `.msi` | **Unsigned.** Windows SmartScreen will warn. Click “Run anyway.” |
 | **Linux** | `.AppImage` / `.deb` / `.rpm` | For AppImage: `chmod +x MetadataZero.AppImage` |
 
 Download here: **https://github.com/metadatazero/metadatazero/releases**
@@ -91,7 +91,7 @@ For the complete list of supported file types with technical details, see [ExifT
 
 | Feature / Capability             | MetadataZero                                   | ExifCleaner                         |
 | -------------------------------- | ---------------------------------------------- | ----------------------------------- |
-| Apple Silicon (M1) Support       | Native                                         | No                                  |
+| Apple Silicon Support            | Native                                         | No                                  |
 | Startup & Performance            | Fast, lightweight                              | Slower to launch, heavier footprint |
 | Memory Usage                     | Low                                            | Higher                              |
 | Security Model                   | Rust backend + strict CSP                      | Larger attack surface               |
