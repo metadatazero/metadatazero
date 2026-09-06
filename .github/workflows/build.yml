@@ -104,14 +104,14 @@ jobs:
       - name: Rename artifacts (macOS)
         if: matrix.platform == 'macos-latest'
         run: |
-          node scripts/rename-artifacts.mjs darwin x86_64-apple-darwin
-          node scripts/rename-artifacts.mjs darwin aarch64-apple-darwin
+          node scripts/rename-artifacts.ts darwin x86_64-apple-darwin
+          node scripts/rename-artifacts.ts darwin aarch64-apple-darwin
 
       - name: Generate updater JSON (macOS)
         if: matrix.platform == 'macos-latest'
         run: |
-          node scripts/generate-updater-json.mjs darwin x86_64-apple-darwin
-          node scripts/generate-updater-json.mjs darwin aarch64-apple-darwin
+          node scripts/generate-updater-json.ts darwin x86_64-apple-darwin
+          node scripts/generate-updater-json.ts darwin aarch64-apple-darwin
 
       - name: Clean old bundles (Linux)
         if: matrix.platform == 'ubuntu-24.04'
@@ -130,19 +130,19 @@ jobs:
 
       - name: Rename artifacts (Linux)
         if: matrix.platform == 'ubuntu-24.04'
-        run: node scripts/rename-artifacts.mjs linux default
+        run: node scripts/rename-artifacts.ts linux default
 
       - name: Generate updater JSON (Linux)
         if: matrix.platform == 'ubuntu-24.04'
-        run: node scripts/generate-updater-json.mjs linux default
+        run: node scripts/generate-updater-json.ts linux default
 
       - name: Rename artifacts (Windows)
         if: matrix.platform == 'windows-latest'
-        run: node scripts/rename-artifacts.mjs windows default
+        run: node scripts/rename-artifacts.ts windows default
 
       - name: Generate updater JSON (Windows)
         if: matrix.platform == 'windows-latest'
-        run: node scripts/generate-updater-json.mjs windows default
+        run: node scripts/generate-updater-json.ts windows default
 
       - name: Upload artifacts (macOS)
         if: matrix.platform == 'macos-latest'
@@ -232,7 +232,7 @@ jobs:
           node-version: '24'
 
       - name: Download ExifTool binaries
-        run: node scripts/download-exiftool.mjs
+        run: node scripts/download-exiftool.ts
 
       - name: Get ExifTool version
         id: exiftool_version
@@ -247,7 +247,7 @@ jobs:
           path: artifacts
 
       - name: Combine updater JSON files
-        run: node scripts/combine-updater-json.mjs
+        run: node scripts/combine-updater-json.ts
 
       - name: Create Release
         uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2

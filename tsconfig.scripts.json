@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* Node strips types without checking them, so this config is the only thing
+       that ever validates scripts/. Wired into npm run build. */
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "jsx": "preserve",
+    "erasableSyntaxOnly": true
+  },
+  "include": ["scripts"],
+  "references": []
+}

@@ -1,20 +1,14 @@
-#!/usr/bin/env node
-
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-import { spawnSync } from 'child_process';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 
 const EXIFTOOL_VERSION = '13.36';
 const EXIFTOOL_SHA256 = 'f70ecbcdccc18268d4d3c290faf8cf73b1cf128e3e7f8671e24d6604cae4dc73';
 const EXIFTOOL_WINDOWS_SHA256 = '6e2ba32f10883aec180f71cf257fd8ac7d4a9d12f7c23e0a965f6f4b7fa7d0e9';
-const BINARIES_DIR = path.join(__dirname, '..', 'src-tauri', 'binaries');
+const BINARIES_DIR = path.join(import.meta.dirname, '..', 'src-tauri', 'binaries');
 
-function verifySHA256(filePath, expectedHash) {
+function verifySHA256(filePath: string, expectedHash: string): void {
   const fileBuffer = fs.readFileSync(filePath);
   const hash = crypto.createHash('sha256');
   hash.update(fileBuffer);
@@ -31,7 +25,7 @@ function verifySHA256(filePath, expectedHash) {
   console.log('✓ Checksum verified');
 }
 
-function checkBinaries() {
+function checkBinaries(): boolean {
   const requiredBinaries = [
     'exiftool-x86_64-apple-darwin',
     'exiftool-aarch64-apple-darwin',
@@ -43,14 +37,14 @@ function checkBinaries() {
   const libDir = path.join(BINARIES_DIR, 'lib');
   const exiftoolFilesDir = path.join(BINARIES_DIR, 'exiftool_files');
 
-  const allExist = requiredBinaries.every(bin =>
+  const allExist = requiredBinaries.every((bin: string) =>
     fs.existsSync(path.join(BINARIES_DIR, bin))
   ) && fs.existsSync(libDir) && fs.existsSync(exiftoolFilesDir);
 
   return allExist;
 }
 
-function downloadWindows() {
+function downloadWindows(): void {
   console.log(`Downloading ExifTool ${EXIFTOOL_VERSION} for Windows...`);
 
   const zipFile = path.join(BINARIES_DIR, 'exiftool-windows.zip');
@@ -93,12 +87,12 @@ function downloadWindows() {
 
     console.log('✓ ExifTool Windows binary downloaded and configured');
   } catch (err) {
-    console.error('Failed to download ExifTool for Windows:', err.message);
+    console.error('Failed to download ExifTool for Windows:', (err as Error).message);
     process.exit(1);
   }
 }
 
-function downloadAndSetup() {
+function downloadAndSetup(): void {
   console.log(`Downloading ExifTool ${EXIFTOOL_VERSION}...`);
 
   const tarFile = path.join(BINARIES_DIR, 'exiftool.tar.gz');
@@ -121,7 +115,7 @@ function downloadAndSetup() {
       'exiftool-aarch64-unknown-linux-gnu'
     ];
 
-    platforms.forEach(target => {
+    platforms.forEach((target: string) => {
       const dest = path.join(BINARIES_DIR, target);
       fs.copyFileSync(sourceExiftool, dest);
       fs.chmodSync(dest, 0o755);
@@ -141,12 +135,12 @@ function downloadAndSetup() {
 
     downloadWindows();
   } catch (err) {
-    console.error('Failed to download ExifTool:', err.message);
+    console.error('Failed to download ExifTool:', (err as Error).message);
     process.exit(1);
   }
 }
 
-function main() {
+function main(): void {
   if (!fs.existsSync(BINARIES_DIR)) {
     fs.mkdirSync(BINARIES_DIR, { recursive: true });
   }
