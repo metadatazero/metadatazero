@@ -138,8 +138,93 @@ jobs:
           name: latest-json-${{ matrix.family }}-${{ matrix.arch }}
           path: ${{ env.BUNDLE_DIR }}/latest.json
 
+  flatpak:
+    name: flatpak-x64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        with:
+          toolchain: stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libpar-packer-perl \
+            flatpak \
+            flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//51 org.gnome.Sdk//51
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # org.gnome.Platform ships no perl, so an unpacked ExifTool cannot start
+      # inside the sandbox. This step is what makes the Flatpak work at all.
+      - name: Pack ExifTool into a self-contained binary
+        run: node scripts/pack-exiftool.ts
+
+      # A plain cargo build would load the frontend from the dev server.
+      - name: Build Tauri app
+        run: npx tauri build --no-bundle
+
+      - name: Prepare Flatpak resources
+        run: |
+          mkdir -p flatpak-build/bin
+          mkdir -p flatpak-build/lib/MetadataZero/binaries
+          mkdir -p flatpak-build/share/applications
+          for size in 32 64 128 256; do mkdir -p "flatpak-build/share/icons/hicolor/${size}x${size}/apps"; done
+          cp src-tauri/target/release/metadatazero flatpak-build/bin/
+          cp src-tauri/binaries/exiftool-x86_64-unknown-linux-gnu flatpak-build/lib/MetadataZero/binaries/
+          cp -r src-tauri/binaries/qpdf flatpak-build/lib/MetadataZero/binaries/
+          cp flatpak/com.metadatazero.app.desktop flatpak-build/share/applications/
+          cp src-tauri/icons/32x32.png flatpak-build/share/icons/hicolor/32x32/apps/com.metadatazero.app.png
+          cp src-tauri/icons/64x64.png flatpak-build/share/icons/hicolor/64x64/apps/com.metadatazero.app.png
+          cp src-tauri/icons/128x128.png flatpak-build/share/icons/hicolor/128x128/apps/com.metadatazero.app.png
+          cp src-tauri/icons/128x128@2x.png flatpak-build/share/icons/hicolor/256x256/apps/com.metadatazero.app.png
+
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          manifest-path: flatpak/com.metadatazero.app.yml
+          bundle: MetadataZero-${{ steps.version.outputs.version }}-linux-x64.flatpak
+          cache-key: flatpak-builder-${{ hashFiles('flatpak/com.metadatazero.app.yml') }}
+          # The next step uploads under a stable name the release job can glob.
+          upload-artifact: false
+
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: flatpak-bundle
+          path: MetadataZero-${{ steps.version.outputs.version }}-linux-x64.flatpak
+
   release:
-    needs: build
+    needs: [build, flatpak]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -173,6 +258,7 @@ jobs:
         with:
           files: |
             artifacts/*-artifacts/**/*
+            artifacts/flatpak-bundle/*.flatpak
             artifacts/latest.json
           body: |
             #### Bundled ExifTool version

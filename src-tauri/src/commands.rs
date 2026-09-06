@@ -33,6 +33,18 @@ pub fn take_pending_files(pending: State<'_, crate::PendingFiles>) -> Vec<String
         .unwrap_or_default()
 }
 
+// latest.json only points to the macOS app, the NSIS installer and the AppImage, so
+// any other install would download an update it cannot apply. The Flatpak is built
+// without a bundle type and is updated by flatpak itself.
+#[tauri::command]
+pub fn updates_supported() -> bool {
+    use tauri::utils::{config::BundleType, platform::bundle_type};
+    matches!(
+        bundle_type(),
+        Some(BundleType::App | BundleType::Nsis | BundleType::AppImage)
+    )
+}
+
 #[tauri::command]
 pub async fn exiftool_version(exiftool: State<'_, ExifToolWrapper>) -> Result<String, String> {
     exiftool.version()

@@ -1,0 +1,57 @@
+app-id: com.metadatazero.app
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: metadatazero
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  # Show in folder asks the file manager to select the cleaned copy.
+  - --talk-name=org.freedesktop.FileManager1
+  # Copies and temporary PDF files are written next to the originals, which the
+  # file chooser portal does not allow, so the folders themselves must be visible.
+  - --filesystem=home
+  - --filesystem=/media
+  - --filesystem=/run/media
+  - --filesystem=/mnt
+
+modules:
+  # The perl that PAR::Packer bundles into ExifTool links libcrypt.so.1, and the
+  # runtime only ships libcrypt.so.2.
+  - name: libxcrypt
+    config-opts:
+      - --disable-static
+      - --enable-obsolete-api=glibc
+      - --disable-werror
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share
+    sources:
+      - type: archive
+        url: https://github.com/besser82/libxcrypt/releases/download/v4.5.2/libxcrypt-4.5.2.tar.xz
+        sha256: 71513a31c01a428bccd5367a32fd95f115d6dac50fb5b60c779d5c7942aec071
+
+  - name: metadatazero
+    buildsystem: simple
+    # Splitting debug info out of the prebuilt QPDF library leaves it unloadable,
+    # and stripping a PAR::Packer executable cuts off the archive it carries.
+    build-options:
+      strip: false
+      no-debuginfo: true
+    build-commands:
+      - install -Dm755 bin/metadatazero ${FLATPAK_DEST}/bin/metadatazero
+      # Tauri looks for resources in ../lib/<productName> next to the executable.
+      - mkdir -p ${FLATPAK_DEST}/lib/MetadataZero
+      - cp -r lib/MetadataZero/binaries ${FLATPAK_DEST}/lib/MetadataZero/
+      - install -Dm644 share/applications/com.metadatazero.app.desktop ${FLATPAK_DEST}/share/applications/com.metadatazero.app.desktop
+      - install -Dm644 share/icons/hicolor/32x32/apps/com.metadatazero.app.png ${FLATPAK_DEST}/share/icons/hicolor/32x32/apps/com.metadatazero.app.png
+      - install -Dm644 share/icons/hicolor/64x64/apps/com.metadatazero.app.png ${FLATPAK_DEST}/share/icons/hicolor/64x64/apps/com.metadatazero.app.png
+      - install -Dm644 share/icons/hicolor/128x128/apps/com.metadatazero.app.png ${FLATPAK_DEST}/share/icons/hicolor/128x128/apps/com.metadatazero.app.png
+      - install -Dm644 share/icons/hicolor/256x256/apps/com.metadatazero.app.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/com.metadatazero.app.png
+    sources:
+      - type: dir
+        path: ../flatpak-build

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=MetadataZero
+GenericName=Metadata Remover
+Comment=Remove metadata from your photos and documents
+Exec=metadatazero %F
+Icon=com.metadatazero.app
+Terminal=false
+Type=Application
+Categories=Graphics;Photography;Utility;
+Keywords=metadata;exif;privacy;photo;image;cleaner;
+MimeType=image/jpeg;image/png;image/gif;image/tiff;image/webp;image/heic;image/heif;video/mp4;video/quicktime;application/pdf;
+StartupNotify=true
+StartupWMClass=metadatazero

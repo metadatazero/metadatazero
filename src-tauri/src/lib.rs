@@ -153,6 +153,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::exiftool_version,
+            commands::updates_supported,
             commands::take_pending_files,
             commands::read_files_metadata,
             commands::clean_file_metadata,

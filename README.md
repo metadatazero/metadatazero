@@ -62,7 +62,7 @@ MetadataZero is available for macOS, Windows, and Linux.
 |---------|-----------|----------------|
 | **macOS** | `.dmg` / `.app` | **Unsigned. Gatekeeper will block it.** To run it: `xattr -dr com.apple.quarantine /Applications/MetadataZero.app` |
 | **Windows** | `.exe` / `.msi` | **Unsigned.** Windows SmartScreen will warn. Click “Run anyway.” |
-| **Linux** | `.AppImage` / `.deb` / `.rpm` | For AppImage: `chmod +x MetadataZero.AppImage` |
+| **Linux** | `.AppImage` / `.deb` / `.rpm` / `.flatpak` | For AppImage: `chmod +x MetadataZero.AppImage` |
 
 Download here: **https://github.com/metadatazero/metadatazero/releases**
 

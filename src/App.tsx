@@ -94,12 +94,14 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'none' | 'downloading' | 'ready'>('none');
   const [versions, setVersions] = useState({ app: '', exiftool: '' });
+  const [updatesSupported, setUpdatesSupported] = useState(false);
   const [preservationOptions, setPreservationOptions] = useState<PreservationOptions>(() =>
     loadJson('preservationOptions', { orientation: false, colorProfile: false, modificationDate: false }));
   const [autoUpdate, setAutoUpdate] = useState<boolean | null>(() =>
     loadJson<{ autoUpdate: boolean | null }>('appSettings', { autoUpdate: null }).autoUpdate);
   const [saveMode, setSaveMode] = useState<SaveMode>(() =>
     localStorage.getItem('saveMode') === 'overwrite' ? 'overwrite' : 'copy');
+  const askUpdates = updatesSupported && autoUpdate === null;
 
   useEffect(() => {
     localStorage.setItem('preservationOptions', JSON.stringify(preservationOptions));
@@ -117,10 +119,11 @@ function App() {
     Promise.all([getVersion(), invoke<string>("exiftool_version")])
       .then(([app, exiftool]) => setVersions({ app, exiftool }))
       .catch((error) => console.error('Failed to read versions:', error));
+    invoke<boolean>("updates_supported").then(setUpdatesSupported);
   }, []);
 
   useEffect(() => {
-    if (!autoUpdate) return;
+    if (!autoUpdate || !updatesSupported) return;
     (async () => {
       try {
         const update = await check();
@@ -134,7 +137,7 @@ function App() {
         setUpdateStatus('none');
       }
     })();
-  }, [autoUpdate]);
+  }, [autoUpdate, updatesSupported]);
 
   const restartNow = async () => {
     try {
@@ -248,7 +251,7 @@ function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      if (!selectedPath || processing || showSettings || autoUpdate === null) return;
+      if (!selectedPath || processing || showSettings || askUpdates) return;
       if (event.target instanceof HTMLInputElement) return;
       event.preventDefault();
       removeFile(selectedPath);
@@ -388,7 +391,7 @@ function App() {
           onPreservation={setPreservationOptions}
           saveMode={saveMode}
           onSaveMode={setSaveMode}
-          autoUpdate={autoUpdate === true}
+          autoUpdate={updatesSupported ? autoUpdate === true : null}
           onAutoUpdate={setAutoUpdate}
           exampleName={copyName(selected?.name ?? 'name.jpg')}
           versions={versions}
@@ -396,7 +399,7 @@ function App() {
         />
       )}
 
-      {autoUpdate === null && (
+      {askUpdates && (
         <div className="scrim centered">
           <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="consent-title">
             <h2 id="consent-title">Check for updates automatically?</h2>
@@ -611,7 +614,7 @@ function SettingsSheet({
   onPreservation: (options: PreservationOptions) => void;
   saveMode: SaveMode;
   onSaveMode: (mode: SaveMode) => void;
-  autoUpdate: boolean;
+  autoUpdate: boolean | null;
   onAutoUpdate: (on: boolean) => void;
   exampleName: string;
   versions: { app: string; exiftool: string };
@@ -671,16 +674,20 @@ function SettingsSheet({
           </label>
         ))}
 
-        <h3 className="eyebrow sheet-section">Updates</h3>
-        <div className="setting-row">
-          <div className="setting-text">
-            <span className="setting-title">Check for updates automatically</span>
-            <span className="setting-description">
-              Connects to github.com when the app starts. Nothing about your files is sent.
-            </span>
-          </div>
-          <Toggle label="Check for updates automatically" on={autoUpdate} onChange={onAutoUpdate} />
-        </div>
+        {autoUpdate !== null && (
+          <>
+            <h3 className="eyebrow sheet-section">Updates</h3>
+            <div className="setting-row">
+              <div className="setting-text">
+                <span className="setting-title">Check for updates automatically</span>
+                <span className="setting-description">
+                  Connects to github.com when the app starts. Nothing about your files is sent.
+                </span>
+              </div>
+              <Toggle label="Check for updates automatically" on={autoUpdate} onChange={onAutoUpdate} />
+            </div>
+          </>
+        )}
 
         <p className="sheet-foot">
           MetadataZero {versions.app}{versions.exiftool && ` · ExifTool ${versions.exiftool}`}
