@@ -442,11 +442,190 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("metadatazero-test-{}-{}", name, std::process::id()));
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "metadatazero-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            unique
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    const ZERO_DATE: &str = "0000:00:00 00:00:00";
+
+    const IDENTIFYING: &[&str] = &[
+        "Artist",
+        "Make",
+        "Model",
+        "Software",
+        "DateTimeOriginal",
+        "CreateDate",
+        "GPSLatitude",
+        "GPSLongitude",
+        "GPSPosition",
+        "GPSCoordinates",
+    ];
+
+    fn fixture(name: &str, dir: &Path) -> PathBuf {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(name);
+        let target = dir.join(name);
+        std::fs::copy(source, &target).unwrap();
+        target
+    }
+
+    fn fields(path: &Path) -> HashMap<String, String> {
+        wrapper()
+            .read_metadata(path.to_str().unwrap())
+            .unwrap()
+            .metadata
+    }
+
+    fn clean_copy(name: &str, orientation: bool, color_profile: bool) -> HashMap<String, String> {
+        let dir = scratch(&format!("{}-{}-{}", name, orientation, color_profile));
+        let original = fixture(name, &dir);
+        let result = wrapper()
+            .clean_metadata(
+                original.to_str().unwrap(),
+                false,
+                orientation,
+                color_profile,
+                false,
+            )
+            .unwrap();
+        assert!(result.success, "{}: {}", name, result.message);
+        fields(Path::new(&result.output_path))
+    }
+
+    #[test]
+    fn fixtures_carry_the_metadata_under_test() {
+        for name in [
+            "photo.jpg",
+            "photo.png",
+            "photo.tiff",
+            "photo.heic",
+            "video.mp4",
+        ] {
+            let dir = scratch(&format!("fixture-{}", name));
+            let found = fields(&fixture(name, &dir));
+            assert_eq!(
+                found.get("Artist").map(String::as_str),
+                Some("Camille Durand"),
+                "{}",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn identifying_fields_are_removed_from_every_format() {
+        for name in [
+            "photo.jpg",
+            "photo.png",
+            "photo.tiff",
+            "photo.heic",
+            "video.mp4",
+        ] {
+            let left = clean_copy(name, false, false);
+            for key in IDENTIFYING {
+                assert!(
+                    left.get(*key).is_none_or(|value| value == ZERO_DATE),
+                    "{} still has {}: {:?}",
+                    name,
+                    key,
+                    left.get(*key)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn orientation_is_removed_unless_kept() {
+        for name in ["photo.jpg", "photo.tiff", "photo.heic"] {
+            assert!(
+                !clean_copy(name, false, false).contains_key("Orientation"),
+                "{}",
+                name
+            );
+            let kept = clean_copy(name, true, false);
+            assert_eq!(
+                kept.get("Orientation").map(String::as_str),
+                Some("Rotate 90 CW"),
+                "{}",
+                name
+            );
+            for key in IDENTIFYING {
+                assert!(
+                    !kept.contains_key(*key),
+                    "{} kept {} along with orientation",
+                    name,
+                    key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn color_profile_is_removed_unless_kept() {
+        for name in ["photo.jpg", "photo.png", "photo.tiff", "photo.heic"] {
+            // HEIC stores the profile as an image property ExifTool cannot delete. It
+            // is the standard profile of the screen, nothing personal.
+            if name != "photo.heic" {
+                assert!(
+                    !clean_copy(name, false, false).contains_key("ProfileDescription"),
+                    "{}",
+                    name
+                );
+            }
+            let kept = clean_copy(name, false, true);
+            assert_eq!(
+                kept.get("ProfileDescription").map(String::as_str),
+                Some("Display P3"),
+                "{}",
+                name
+            );
+            for key in IDENTIFYING {
+                assert!(
+                    !kept.contains_key(*key),
+                    "{} kept {} along with the color profile",
+                    name,
+                    key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn replacing_a_photo_leaves_no_backup_with_the_metadata() {
+        let dir = scratch("replace-photo");
+        let original = fixture("photo.jpg", &dir);
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), true, false, false, false)
+            .unwrap();
+        assert!(result.success, "{}", result.message);
+        assert!(!fields(&original).contains_key("Artist"));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn an_existing_copy_is_never_overwritten() {
+        let dir = scratch("existing-copy");
+        let original = fixture("photo.jpg", &dir);
+        std::fs::write(dir.join("photo_metadatazero.jpg"), b"keep me").unwrap();
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+            .unwrap();
+        assert!(!result.success);
+        assert_eq!(
+            std::fs::read(dir.join("photo_metadatazero.jpg")).unwrap(),
+            b"keep me"
+        );
     }
 
     #[test]
