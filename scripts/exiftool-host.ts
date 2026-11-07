@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readTools } from './tools.ts';
 
-export const EXIFTOOL_VERSION = '13.55';
-export const EXIFTOOL_SHA256 = '5c9d422ad128fab728aacc5cc0aa77095d14cde74931389dd961d3d720e6b316';
-export const EXIFTOOL_WINDOWS_SHA256 = '9fadaf5221dcb07a5d018e21c8529e257917d2fad1fdfc8e64855c4fb73293df';
+const { exiftool } = readTools();
+export const EXIFTOOL_VERSION = exiftool.version;
+export const EXIFTOOL_SHA256 = exiftool.sha256['macos-linux'];
+export const EXIFTOOL_WINDOWS_SHA256 = exiftool.sha256.windows;
 
 export const BINARIES_DIR = path.join(import.meta.dirname, '..', 'src-tauri', 'binaries');
+export const EXIFTOOL_MARKER = path.join(BINARIES_DIR, 'exiftool.version');
 export const LIB_DIR = path.join(BINARIES_DIR, 'lib');
 export const WINDOWS_FILES_DIR = path.join(BINARIES_DIR, 'exiftool_files');
 

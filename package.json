@@ -12,7 +12,8 @@
     "build": "tsc && tsc -p tsconfig.scripts.json && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "postinstall": "node scripts/download-exiftool.ts && node scripts/download-qpdf.ts"
+    "postinstall": "node scripts/download-exiftool.ts && node scripts/download-qpdf.ts",
+    "update-tools": "node scripts/update-tools.ts"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "5.3.0",

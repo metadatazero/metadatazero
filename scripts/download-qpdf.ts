@@ -3,16 +3,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { BINARIES_DIR, isWindows } from './exiftool-host.ts';
+import { QPDF_ASSETS, qpdfUrl, readTools } from './tools.ts';
 
-const QPDF_VERSION = '12.4.2';
-
-const ASSETS: Record<string, { asset: string; sha256: string }> = {
-  'darwin-arm64': { asset: 'bin-macos-arm64', sha256: '62e46987a30ea167cbc530ccb22690aec3d8c812ed09979a941bcee92e504b79' },
-  'darwin-x64': { asset: 'bin-macos-x86_64', sha256: 'dd3b01f4414d198529bb0f13bba59c2f016a328bb3506695087a96fb80fc1481' },
-  'linux-x64': { asset: 'bin-linux-x86_64', sha256: 'db367d897829f22c4198ce1094143c9d467bd6ee7dfabc44ba6f02056b24f8b1' },
-  'linux-arm64': { asset: 'bin-linux-aarch64', sha256: '8fd9d009eb0838398180a603f2cf76531e5c68a4ecc8847598e0a1ccb1d3b600' },
-  'win32-x64': { asset: 'msvc64', sha256: 'db87077e683630c1217e0e8f9a20a9749d952ab676e881c3689187763a5de25d' },
-};
+const { qpdf } = readTools();
+const QPDF_VERSION = qpdf.version;
 
 const QPDF_DIR = path.join(BINARIES_DIR, 'qpdf');
 const MARKER = path.join(QPDF_DIR, 'VERSION');
@@ -43,8 +37,9 @@ function copyLibraries(from: string, to: string): void {
 
 function download(): void {
   const key = `${process.platform}-${process.arch}`;
-  const target = ASSETS[key];
-  if (!target) throw new Error(`Unsupported host: ${key}`);
+  const asset = QPDF_ASSETS[key];
+  if (!asset) throw new Error(`Unsupported host: ${key}`);
+  const expected = qpdf.sha256[asset];
 
   console.log(`Downloading QPDF ${QPDF_VERSION}...`);
 
@@ -52,17 +47,17 @@ function download(): void {
   const extractDir = path.join(BINARIES_DIR, 'qpdf-extract');
   fs.rmSync(extractDir, { recursive: true, force: true });
 
-  run('curl', ['-fL', '-o', zipFile, `https://github.com/qpdf/qpdf/releases/download/v${QPDF_VERSION}/qpdf-${QPDF_VERSION}-${target.asset}.zip`]);
+  run('curl', ['-fL', '-o', zipFile, qpdfUrl(QPDF_VERSION, asset)]);
 
   const actual = crypto.createHash('sha256').update(fs.readFileSync(zipFile)).digest('hex');
-  if (actual !== target.sha256) {
-    throw new Error(`Checksum verification failed for QPDF!\n  Expected: ${target.sha256}\n  Actual:   ${actual}`);
+  if (actual !== expected) {
+    throw new Error(`Checksum verification failed for QPDF!\n  Expected: ${expected}\n  Actual:   ${actual}`);
   }
   console.log('✓ Checksum verified');
 
   run('unzip', ['-q', '-o', zipFile, '-d', extractDir]);
 
-  const root = isWindows() ? path.join(extractDir, `qpdf-${QPDF_VERSION}-${target.asset}`) : extractDir;
+  const root = isWindows() ? path.join(extractDir, `qpdf-${QPDF_VERSION}-${asset}`) : extractDir;
   fs.rmSync(QPDF_DIR, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(BINARY), { recursive: true });
 

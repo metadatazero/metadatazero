@@ -6,6 +6,7 @@ import {
   BINARIES_DIR,
   EXIFTOOL_SHA256,
   EXIFTOOL_VERSION,
+  EXIFTOOL_MARKER,
   EXIFTOOL_WINDOWS_SHA256,
   LIB_DIR,
   WINDOWS_FILES_DIR,
@@ -13,6 +14,7 @@ import {
   isPacked,
   isWindows,
 } from './exiftool-host.ts';
+import { exiftoolUrls } from './tools.ts';
 
 function run(command: string, args: string[]): void {
   const result = spawnSync(command, args, { stdio: 'inherit', cwd: BINARIES_DIR });
@@ -42,7 +44,7 @@ function downloadWindows(): void {
   const zipFile = path.join(BINARIES_DIR, 'exiftool-windows.zip');
   const extractBaseDir = path.join(BINARIES_DIR, `exiftool-${EXIFTOOL_VERSION}_64`);
 
-  run('curl', ['-fL', '-o', zipFile, `https://sourceforge.net/projects/exiftool/files/exiftool-${EXIFTOOL_VERSION}_64.zip/download`]);
+  run('curl', ['-fL', '-o', zipFile, exiftoolUrls(EXIFTOOL_VERSION).windows]);
   verifySHA256(zipFile, EXIFTOOL_WINDOWS_SHA256);
   run('unzip', ['-q', '-o', zipFile, '-d', BINARIES_DIR]);
 
@@ -68,7 +70,7 @@ function downloadUnix(): void {
   const tarFile = path.join(BINARIES_DIR, 'exiftool.tar.gz');
   const extractDir = path.join(BINARIES_DIR, `exiftool-${EXIFTOOL_VERSION}`);
 
-  run('curl', ['-fL', '-o', tarFile, `https://github.com/exiftool/exiftool/archive/refs/tags/${EXIFTOOL_VERSION}.tar.gz`]);
+  run('curl', ['-fL', '-o', tarFile, exiftoolUrls(EXIFTOOL_VERSION)['macos-linux']]);
   verifySHA256(tarFile, EXIFTOOL_SHA256);
   run('tar', ['-xzf', tarFile]);
 
@@ -85,6 +87,8 @@ function downloadUnix(): void {
 }
 
 function isConfigured(): boolean {
+  const current = fs.existsSync(EXIFTOOL_MARKER) && fs.readFileSync(EXIFTOOL_MARKER, 'utf8') === EXIFTOOL_VERSION;
+  if (!current) return false;
   if (isPacked()) return !isWindows() || fs.existsSync(WINDOWS_FILES_DIR);
   return fs.existsSync(hostSidecarPath()) && fs.existsSync(LIB_DIR);
 }
@@ -97,6 +101,7 @@ if (isConfigured()) {
   try {
     if (isWindows()) downloadWindows();
     else downloadUnix();
+    fs.writeFileSync(EXIFTOOL_MARKER, EXIFTOOL_VERSION);
   } catch (err) {
     console.error('Failed to download ExifTool:', (err as Error).message);
     process.exit(1);

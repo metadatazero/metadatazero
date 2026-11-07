@@ -1,0 +1,19 @@
+{
+  "exiftool": {
+    "version": "13.55",
+    "sha256": {
+      "macos-linux": "5c9d422ad128fab728aacc5cc0aa77095d14cde74931389dd961d3d720e6b316",
+      "windows": "9fadaf5221dcb07a5d018e21c8529e257917d2fad1fdfc8e64855c4fb73293df"
+    }
+  },
+  "qpdf": {
+    "version": "12.4.2",
+    "sha256": {
+      "bin-macos-arm64": "62e46987a30ea167cbc530ccb22690aec3d8c812ed09979a941bcee92e504b79",
+      "bin-macos-x86_64": "dd3b01f4414d198529bb0f13bba59c2f016a328bb3506695087a96fb80fc1481",
+      "bin-linux-x86_64": "db367d897829f22c4198ce1094143c9d467bd6ee7dfabc44ba6f02056b24f8b1",
+      "bin-linux-aarch64": "8fd9d009eb0838398180a603f2cf76531e5c68a4ecc8847598e0a1ccb1d3b600",
+      "msvc64": "db87077e683630c1217e0e8f9a20a9749d952ab676e881c3689187763a5de25d"
+    }
+  }
+}
