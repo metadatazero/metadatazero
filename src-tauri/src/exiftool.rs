@@ -77,6 +77,14 @@ impl ExifToolWrapper {
         Ok(Self { exiftool_path })
     }
 
+    pub fn version(&self) -> Result<String, String> {
+        let output = Command::new(&self.exiftool_path)
+            .arg("-ver")
+            .output()
+            .map_err(|e| format!("Failed to execute exiftool: {}", e))?;
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     pub fn read_metadata(&self, file_path: &str) -> Result<MetadataInfo, String> {
         let path = Path::new(file_path);
         if !path.exists() {

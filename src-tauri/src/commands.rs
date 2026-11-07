@@ -30,6 +30,12 @@ fn is_supported_file(path: &Path) -> bool {
 }
 
 #[tauri::command]
+pub async fn exiftool_version(state: State<'_, AppState>) -> Result<String, String> {
+    let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
+    exiftool.version()
+}
+
+#[tauri::command]
 pub async fn read_file_metadata(
     file_path: String,
     state: State<'_, AppState>,
