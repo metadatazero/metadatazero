@@ -24,6 +24,22 @@ pub struct ExifToolWrapper {
     exiftool_path: PathBuf,
 }
 
+fn output_path_for(path: &Path, overwrite: bool) -> Result<String, String> {
+    if overwrite {
+        return Ok(path.to_string_lossy().to_string());
+    }
+    let file_stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("Invalid file name")?;
+    let parent = path.parent().ok_or("Invalid file path")?;
+    let output_name = match path.extension().and_then(|s| s.to_str()) {
+        Some(extension) => format!("{}_metadatazero.{}", file_stem, extension),
+        None => format!("{}_metadatazero", file_stem),
+    };
+    Ok(parent.join(output_name).to_string_lossy().to_string())
+}
+
 impl ExifToolWrapper {
     pub fn new(app_handle: &tauri::AppHandle) -> Result<Self, String> {
         let resource_path = app_handle
@@ -120,7 +136,7 @@ impl ExifToolWrapper {
     pub fn clean_metadata(
         &self,
         file_path: &str,
-        backup: bool,
+        overwrite: bool,
         preserve_orientation: bool,
         preserve_color_profile: bool,
         preserve_modification_date: bool,
@@ -130,28 +146,7 @@ impl ExifToolWrapper {
             return Err(format!("File not found: {}", file_path));
         }
 
-        let output_path = if !backup {
-            let file_stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or("Invalid file name")?;
-            let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let parent = path.parent().ok_or("Invalid file path")?;
-
-            let output_name = if extension.is_empty() {
-                format!("{}_cleaned", file_stem)
-            } else {
-                format!("{}_cleaned.{}", file_stem, extension)
-            };
-
-            parent
-                .join(output_name)
-                .to_str()
-                .ok_or("Failed to create output path")?
-                .to_string()
-        } else {
-            file_path.to_string()
-        };
+        let output_path = output_path_for(path, overwrite)?;
 
         let mut args = vec!["-all="];
 
@@ -181,7 +176,9 @@ impl ExifToolWrapper {
             args.push("-P");
         }
 
-        if !backup {
+        if overwrite {
+            args.push("-overwrite_original");
+        } else {
             args.push("-o");
             args.push(&output_path);
         }
@@ -213,7 +210,7 @@ impl ExifToolWrapper {
         &self,
         file_path: &str,
         tags: Vec<String>,
-        backup: bool,
+        overwrite: bool,
         preserve_modification_date: bool,
     ) -> Result<CleanResult, String> {
         let path = Path::new(file_path);
@@ -221,28 +218,7 @@ impl ExifToolWrapper {
             return Err(format!("File not found: {}", file_path));
         }
 
-        let output_path = if !backup {
-            let file_stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or("Invalid file name")?;
-            let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let parent = path.parent().ok_or("Invalid file path")?;
-
-            let output_name = if extension.is_empty() {
-                format!("{}_cleaned", file_stem)
-            } else {
-                format!("{}_cleaned.{}", file_stem, extension)
-            };
-
-            parent
-                .join(output_name)
-                .to_str()
-                .ok_or("Failed to create output path")?
-                .to_string()
-        } else {
-            file_path.to_string()
-        };
+        let output_path = output_path_for(path, overwrite)?;
 
         let mut args = Vec::new();
         let tag_count = tags.len();
@@ -255,7 +231,9 @@ impl ExifToolWrapper {
             args.push("-P".to_string());
         }
 
-        if !backup {
+        if overwrite {
+            args.push("-overwrite_original".to_string());
+        } else {
             args.push("-o".to_string());
             args.push(output_path.clone());
         }

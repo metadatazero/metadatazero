@@ -41,7 +41,7 @@ pub async fn read_file_metadata(
 #[tauri::command]
 pub async fn clean_file_metadata(
     file_path: String,
-    backup: bool,
+    overwrite: bool,
     preserve_orientation: bool,
     preserve_color_profile: bool,
     preserve_modification_date: bool,
@@ -50,7 +50,7 @@ pub async fn clean_file_metadata(
     let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
     exiftool.clean_metadata(
         &file_path,
-        backup,
+        overwrite,
         preserve_orientation,
         preserve_color_profile,
         preserve_modification_date,
@@ -61,18 +61,18 @@ pub async fn clean_file_metadata(
 pub async fn clean_file_selective(
     file_path: String,
     tags: Vec<String>,
-    backup: bool,
+    overwrite: bool,
     preserve_modification_date: bool,
     state: State<'_, AppState>,
 ) -> Result<CleanResult, String> {
     let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
-    exiftool.clean_selective(&file_path, tags, backup, preserve_modification_date)
+    exiftool.clean_selective(&file_path, tags, overwrite, preserve_modification_date)
 }
 
 #[tauri::command]
 pub async fn clean_multiple_files(
     file_paths: Vec<String>,
-    backup: bool,
+    overwrite: bool,
     preserve_orientation: bool,
     preserve_color_profile: bool,
     preserve_modification_date: bool,
@@ -85,7 +85,7 @@ pub async fn clean_multiple_files(
             exiftool
                 .clean_metadata(
                     file_path,
-                    backup,
+                    overwrite,
                     preserve_orientation,
                     preserve_color_profile,
                     preserve_modification_date,

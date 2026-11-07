@@ -39,7 +39,7 @@ MetadataZero gives you control over this information with a simple drag-and-drop
 - **Comprehensive Metadata Removal** - Uses ExifTool for thorough cleaning of all metadata types
 - **100% Offline** - No internet connection required; all processing happens locally
 - **Local Processing** - All operations happen on your device; no files are uploaded to external servers
-- **Safe by Default** - Creates new files with "_cleaned" suffix, preserving your originals
+- **Safe by Default** - Creates new files with a "_metadatazero" suffix, preserving your originals
 
 ### User Experience
 - **Drag & Drop Interface** - Simple, intuitive file and folder handling
@@ -151,7 +151,7 @@ npm run tauri dev
 3. **Configure Options** - Click "Settings" to choose what metadata to preserve
 4. **Single Clean** - Click "Clean" to remove metadata from individual files
 5. **Batch Clean** - Click "Clean All" to process multiple files in parallel
-6. **Safe Output** - New files are created with "_cleaned" suffix, keeping originals intact
+6. **Safe Output** - New files are created with a "_metadatazero" suffix, keeping originals intact
 
 **Preservation Options**: By default, all metadata is removed for maximum privacy. You can optionally preserve:
 - **Image Orientation** - Keeps orientation metadata so images display correctly

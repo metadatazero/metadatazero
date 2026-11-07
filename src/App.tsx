@@ -250,7 +250,7 @@ function App() {
     try {
       await invoke("clean_file_metadata", {
         filePath: filePath,
-        backup: false,
+        overwrite: false,
         preserveOrientation: preservationOptions.orientation,
         preserveColorProfile: preservationOptions.colorProfile,
         preserveModificationDate: preservationOptions.modificationDate,
@@ -281,7 +281,7 @@ function App() {
       try {
         await invoke("clean_file_metadata", {
           filePath: file.path,
-          backup: false,
+          overwrite: false,
           preserveOrientation: preservationOptions.orientation,
           preserveColorProfile: preservationOptions.colorProfile,
           preserveModificationDate: preservationOptions.modificationDate,
