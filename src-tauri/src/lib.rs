@@ -4,7 +4,6 @@ mod exiftool;
 use exiftool::ExifToolWrapper;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::menu::MenuItem;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Default)]
@@ -28,9 +27,6 @@ fn paths_from_args(args: &[String], cwd: &Path) -> Vec<String> {
         .map(|path| path.to_string_lossy().to_string())
         .collect()
 }
-
-#[cfg(not(target_os = "macos"))]
-use tauri::menu::Menu;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -62,7 +58,7 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             {
-                use tauri::menu::{MenuBuilder, PredefinedMenuItem, Submenu};
+                use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, Submenu};
 
                 let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, Some("Cmd+,"))?;
 
@@ -115,20 +111,6 @@ pub fn run() {
                     .item(&edit_menu)
                     .item(&window_menu)
                     .build()?;
-
-                app.set_menu(menu)?;
-
-                app.on_menu_event(move |app, event| {
-                    if event.id() == "settings" {
-                        let _ = app.emit("open-settings", ());
-                    }
-                });
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&settings_item])?;
 
                 app.set_menu(menu)?;
 
