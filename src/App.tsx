@@ -210,6 +210,25 @@ function App() {
     setSelectedPath(null);
   };
 
+  const removeFile = (path: string) => {
+    const index = files.findIndex((f) => f.path === path);
+    const rest = files.filter((f) => f.path !== path);
+    setFiles((prev) => prev.filter((f) => f.path !== path));
+    if (selectedPath === path) setSelectedPath(rest[Math.min(index, rest.length - 1)]?.path ?? null);
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (!selectedPath || processing || showSettings || autoUpdate === null) return;
+      if (event.target instanceof HTMLInputElement) return;
+      event.preventDefault();
+      removeFile(selectedPath);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const selected = files.find((f) => f.path === selectedPath) ?? null;
   const remaining = files.filter((f) => f.status !== 'cleaned' && !f.readError);
   const remainingFields = remaining.reduce((sum, f) => sum + (f.metadata ? fieldCount(f.metadata) : 0), 0);
@@ -292,7 +311,9 @@ function App() {
                   file={file}
                   color={THUMBNAIL_COLORS[index % THUMBNAIL_COLORS.length]}
                   selected={file.path === selectedPath}
+                  removable={!processing}
                   onSelect={() => setSelectedPath(file.path)}
+                  onRemove={() => removeFile(file.path)}
                 />
               ))}
             </div>
@@ -376,11 +397,13 @@ function App() {
   );
 }
 
-function FileRow({ file, color, selected, onSelect }: {
+function FileRow({ file, color, selected, removable, onSelect, onRemove }: {
   file: FileItem;
   color: string;
   selected: boolean;
+  removable: boolean;
   onSelect: () => void;
+  onRemove: () => void;
 }) {
   const cleaned = file.status === 'cleaned';
   const busy = file.loading || file.status === 'processing';
@@ -408,16 +431,29 @@ function FileRow({ file, color, selected, onSelect }: {
   }
 
   return (
-    <button className={`file-row ${selected ? 'selected' : ''}`} onClick={onSelect}>
-      <span className="thumbnail" style={{ background: color }} />
-      <span className="file-text">
-        <span className="file-name">{file.name}</span>
-        <span className="file-detail">{detail}</span>
-      </span>
-      <span className={`field-count ${cleaned ? 'marker' : ''}`}>
-        {busy ? '…' : cleaned ? '0' : file.metadata ? fieldCount(file.metadata) : ''}
-      </span>
-    </button>
+    <div className={`file-row ${selected ? 'selected' : ''}`}>
+      <button className="file-row-main" onClick={onSelect}>
+        <span className="thumbnail" style={{ background: color }} />
+        <span className="file-text">
+          <span className="file-name">{file.name}</span>
+          <span className="file-detail">{detail}</span>
+        </span>
+        <span className={`field-count ${cleaned ? 'marker' : ''}`}>
+          {busy ? '…' : cleaned ? '0' : file.metadata ? fieldCount(file.metadata) : ''}
+        </span>
+      </button>
+      <button
+        className="file-remove"
+        aria-label={`Remove ${file.name} from the list`}
+        title="Remove from list"
+        disabled={!removable}
+        onClick={onRemove}
+      >
+        <svg viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M2 2L10 10M10 2L2 10" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
