@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { pictureDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -224,8 +225,11 @@ function App() {
     setProcessing(false);
   };
 
+  // Without a starting folder Windows opens the folder the app was launched from,
+  // which is its install folder.
   const browseFiles = async () => {
-    const selected = await open({ multiple: true });
+    const last = files[files.length - 1]?.path.replace(/[\\/][^\\/]*$/, '');
+    const selected = await open({ multiple: true, defaultPath: last ?? await pictureDir().catch(() => undefined) });
     if (selected) handleFiles(Array.isArray(selected) ? selected : [selected]);
   };
 
