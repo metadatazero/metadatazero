@@ -37,6 +37,14 @@ interface PreservationOptions {
   modificationDate: boolean;
 }
 
+interface ReadOutcome {
+  file_path: string;
+  info?: { file_size: number; metadata: Metadata };
+  error?: string;
+}
+
+const READ_BATCH = 25;
+
 interface CleanResult {
   success: boolean;
   output_path: string;
@@ -140,13 +148,18 @@ function App() {
       });
       setSelectedPath((current) => current ?? expanded[0] ?? null);
 
-      for (const path of expanded) {
+      for (let start = 0; start < expanded.length; start += READ_BATCH) {
+        const batch = expanded.slice(start, start + READ_BATCH);
         try {
-          const info = await invoke<{ file_size: number; metadata: Metadata }>("read_file_metadata", { filePath: path });
-          updateFile(path, { metadata: info.metadata, size: info.file_size, loading: false });
+          const outcomes = await invoke<ReadOutcome[]>("read_files_metadata", { filePaths: batch });
+          for (const { file_path, info, error } of outcomes) {
+            updateFile(file_path, info
+              ? { metadata: info.metadata, size: info.file_size, loading: false }
+              : { readError: error, loading: false });
+          }
         } catch (error) {
           console.error("Failed to read metadata:", error);
-          updateFile(path, { readError: String(error), loading: false });
+          batch.forEach((path) => updateFile(path, { readError: String(error), loading: false }));
         }
       }
     } catch (error) {

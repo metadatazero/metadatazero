@@ -1,10 +1,9 @@
 mod commands;
 mod exiftool;
 
-use commands::AppState;
 use exiftool::ExifToolWrapper;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tauri::menu::MenuItem;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -55,9 +54,7 @@ pub fn run() {
         .setup(|app| {
             let exiftool = ExifToolWrapper::new(&app.handle())?;
 
-            app.manage(AppState {
-                exiftool: Arc::new(Mutex::new(exiftool)),
-            });
+            app.manage(exiftool);
 
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_default();
@@ -147,11 +144,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::exiftool_version,
             commands::take_pending_files,
-            commands::read_file_metadata,
+            commands::read_files_metadata,
             commands::clean_file_metadata,
-            commands::clean_file_selective,
-            commands::clean_multiple_files,
-            commands::read_multiple_metadata,
             commands::expand_paths,
         ])
         .build(tauri::generate_context!())

@@ -46,6 +46,35 @@ const QUICKTIME_DATES: &[&str] = &[
     "MediaModifyDate",
 ];
 
+fn binary_paths(binaries: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let exiftool_name = if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "exiftool-aarch64-apple-darwin"
+        } else {
+            "exiftool-x86_64-apple-darwin"
+        }
+    } else if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "aarch64") {
+            "exiftool-aarch64-unknown-linux-gnu"
+        } else {
+            "exiftool-x86_64-unknown-linux-gnu"
+        }
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "exiftool-x86_64-pc-windows-msvc.exe"
+    } else {
+        return Err("Unsupported platform".to_string());
+    };
+    let qpdf_name = if cfg!(target_os = "windows") {
+        "qpdf.exe"
+    } else {
+        "qpdf"
+    };
+    Ok((
+        binaries.join(exiftool_name),
+        binaries.join("qpdf").join("bin").join(qpdf_name),
+    ))
+}
+
 // A copy must stay as private as the file it was made from.
 fn copy_permissions(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::metadata(from)
@@ -97,6 +126,43 @@ fn clean_result(
     }
 }
 
+fn metadata_info(
+    file_path: &str,
+    entry: HashMap<String, serde_json::Value>,
+) -> Result<MetadataInfo, String> {
+    let path = Path::new(file_path);
+    let file_size = std::fs::metadata(path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?
+        .len();
+    let metadata = entry
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let formatted = match value {
+                serde_json::Value::String(s) => s,
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => return None,
+            };
+            Some((key, formatted))
+        })
+        .collect();
+    Ok(MetadataInfo {
+        file_path: file_path.to_string(),
+        file_name: path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        file_size,
+        metadata,
+    })
+}
+
 impl ExifToolWrapper {
     pub fn new(app_handle: &tauri::AppHandle) -> Result<Self, String> {
         let resource_path = app_handle
@@ -104,25 +170,7 @@ impl ExifToolWrapper {
             .resource_dir()
             .map_err(|e| format!("Failed to get resource dir: {}", e))?;
 
-        let exiftool_name = if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") {
-                "exiftool-aarch64-apple-darwin"
-            } else {
-                "exiftool-x86_64-apple-darwin"
-            }
-        } else if cfg!(target_os = "linux") {
-            if cfg!(target_arch = "aarch64") {
-                "exiftool-aarch64-unknown-linux-gnu"
-            } else {
-                "exiftool-x86_64-unknown-linux-gnu"
-            }
-        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-            "exiftool-x86_64-pc-windows-msvc.exe"
-        } else {
-            return Err("Unsupported platform".to_string());
-        };
-
-        let exiftool_path = resource_path.join("binaries").join(exiftool_name);
+        let (exiftool_path, qpdf_path) = binary_paths(&resource_path.join("binaries"))?;
 
         if !exiftool_path.exists() {
             return Err(format!(
@@ -130,17 +178,6 @@ impl ExifToolWrapper {
                 exiftool_path.display()
             ));
         }
-
-        let qpdf_name = if cfg!(target_os = "windows") {
-            "qpdf.exe"
-        } else {
-            "qpdf"
-        };
-        let qpdf_path = resource_path
-            .join("binaries")
-            .join("qpdf")
-            .join("bin")
-            .join(qpdf_name);
 
         if !qpdf_path.exists() {
             return Err(format!("QPDF binary not found at: {}", qpdf_path.display()));
@@ -258,60 +295,49 @@ impl ExifToolWrapper {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    pub fn read_metadata(&self, file_path: &str) -> Result<MetadataInfo, String> {
-        let path = Path::new(file_path);
-        if !path.exists() {
-            return Err(format!("File not found: {}", file_path));
-        }
-
-        let metadata =
-            std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
-
-        let output = Command::new(&self.exiftool_path)
-            .arg("-json")
-            .arg("-a")
-            .arg("-s")
-            .arg(file_path)
+    // One ExifTool run for many files: starting the packed binary costs far more than
+    // reading a file. Results come back in the order of `file_paths`.
+    pub fn read_many(&self, file_paths: &[String]) -> Vec<Result<MetadataInfo, String>> {
+        let output = match Command::new(&self.exiftool_path)
+            .args(["-json", "-a", "-s"])
+            .args(file_paths)
             .output()
-            .map_err(|e| format!("Failed to execute exiftool: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("ExifTool error: {}", stderr));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let json_data: Vec<HashMap<String, serde_json::Value>> = serde_json::from_str(&stdout)
-            .map_err(|e| format!("Failed to parse ExifTool output: {}", e))?;
-
-        let mut metadata_map = HashMap::new();
-        if let Some(first) = json_data.first() {
-            for (key, value) in first.iter() {
-                let formatted_value = match value {
-                    serde_json::Value::String(s) => s.clone(),
-                    serde_json::Value::Number(n) => n.to_string(),
-                    serde_json::Value::Bool(b) => b.to_string(),
-                    serde_json::Value::Array(arr) => arr
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    _ => continue,
-                };
-                metadata_map.insert(key.clone(), formatted_value);
+        {
+            Ok(output) => output,
+            Err(e) => {
+                let message = format!("Failed to execute exiftool: {}", e);
+                return file_paths.iter().map(|_| Err(message.clone())).collect();
             }
-        }
+        };
 
-        Ok(MetadataInfo {
-            file_path: file_path.to_string(),
-            file_name: path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            file_size: metadata.len(),
-            metadata: metadata_map,
-        })
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let entries: Vec<HashMap<String, serde_json::Value>> =
+            serde_json::from_slice(&output.stdout).unwrap_or_default();
+        let normalize = |path: &str| path.replace('\\', "/");
+        let mut by_path: HashMap<String, HashMap<String, serde_json::Value>> = entries
+            .into_iter()
+            .filter_map(|entry| {
+                let source = entry.get("SourceFile")?.as_str()?.to_string();
+                Some((normalize(&source), entry))
+            })
+            .collect();
+
+        file_paths
+            .iter()
+            .map(|file_path| {
+                let entry = by_path.remove(&normalize(file_path)).ok_or_else(|| {
+                    if stderr.is_empty() {
+                        "ExifTool could not read this file".to_string()
+                    } else {
+                        format!("ExifTool error: {}", stderr)
+                    }
+                })?;
+                if let Some(error) = entry.get("Error").and_then(|e| e.as_str()) {
+                    return Err(format!("ExifTool error: {}", error));
+                }
+                metadata_info(file_path, entry)
+            })
+            .collect()
     }
 
     pub fn clean_metadata(
@@ -366,28 +392,6 @@ impl ExifToolWrapper {
             "Metadata cleaned successfully".to_string(),
         ))
     }
-
-    pub fn clean_selective(
-        &self,
-        file_path: &str,
-        tags: Vec<String>,
-        overwrite: bool,
-        preserve_modification_date: bool,
-    ) -> Result<CleanResult, String> {
-        if !Path::new(file_path).exists() {
-            return Err(format!("File not found: {}", file_path));
-        }
-
-        let tag_count = tags.len();
-        let args = tags.iter().map(|tag| format!("-{}=", tag)).collect();
-        let result = self.write_cleaned(file_path, args, overwrite, preserve_modification_date);
-        Ok(clean_result(
-            file_path,
-            overwrite,
-            result,
-            format!("Removed {} metadata tags", tag_count),
-        ))
-    }
 }
 
 #[cfg(test)]
@@ -398,24 +402,10 @@ mod tests {
 
     fn wrapper() -> ExifToolWrapper {
         let binaries = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
-        let exiftool = if cfg!(target_os = "windows") {
-            "exiftool-x86_64-pc-windows-msvc.exe".to_string()
-        } else {
-            let os = if cfg!(target_os = "macos") {
-                "apple-darwin"
-            } else {
-                "unknown-linux-gnu"
-            };
-            format!("exiftool-{}-{}", std::env::consts::ARCH, os)
-        };
-        let qpdf = if cfg!(target_os = "windows") {
-            "qpdf.exe"
-        } else {
-            "qpdf"
-        };
+        let (exiftool_path, qpdf_path) = binary_paths(&binaries).unwrap();
         ExifToolWrapper {
-            exiftool_path: binaries.join(exiftool),
-            qpdf_path: binaries.join("qpdf").join("bin").join(qpdf),
+            exiftool_path,
+            qpdf_path,
         }
     }
 
@@ -494,7 +484,8 @@ mod tests {
 
     fn fields(path: &Path) -> HashMap<String, String> {
         wrapper()
-            .read_metadata(path.to_str().unwrap())
+            .read_many(&[path.to_string_lossy().to_string()])
+            .remove(0)
             .unwrap()
             .metadata
     }
@@ -638,6 +629,25 @@ mod tests {
             std::fs::read(dir.join("photo_metadatazero.jpg")).unwrap(),
             b"keep me"
         );
+    }
+
+    #[test]
+    fn many_files_are_read_in_one_run_in_order() {
+        let dir = scratch("read-many");
+        let photo = fixture("photo.jpg", &dir);
+        let video = fixture("video.mp4", &dir);
+        let missing = dir.join("missing.jpg");
+        let paths: Vec<String> = [&video, &missing, &photo]
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        let results = wrapper().read_many(&paths);
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].as_ref().unwrap().file_name, "video.mp4");
+        assert!(results[1].is_err());
+        assert_eq!(results[2].as_ref().unwrap().file_name, "photo.jpg");
     }
 
     #[cfg(unix)]

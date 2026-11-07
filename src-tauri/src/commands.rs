@@ -1,13 +1,8 @@
 use crate::exiftool::{CleanResult, ExifToolWrapper, MetadataInfo};
-use rayon::prelude::*;
+use serde::Serialize;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use tauri::State;
 use walkdir::WalkDir;
-
-pub struct AppState {
-    pub exiftool: Arc<Mutex<ExifToolWrapper>>,
-}
 
 fn is_supported_file(path: &Path) -> bool {
     const SUPPORTED_EXTENSIONS: &[&str] = &[
@@ -39,18 +34,39 @@ pub fn take_pending_files(pending: State<'_, crate::PendingFiles>) -> Vec<String
 }
 
 #[tauri::command]
-pub async fn exiftool_version(state: State<'_, AppState>) -> Result<String, String> {
-    let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
+pub async fn exiftool_version(exiftool: State<'_, ExifToolWrapper>) -> Result<String, String> {
     exiftool.version()
 }
 
-#[tauri::command]
-pub async fn read_file_metadata(
+#[derive(Serialize)]
+pub struct ReadOutcome {
     file_path: String,
-    state: State<'_, AppState>,
-) -> Result<MetadataInfo, String> {
-    let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
-    exiftool.read_metadata(&file_path)
+    info: Option<MetadataInfo>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn read_files_metadata(
+    file_paths: Vec<String>,
+    exiftool: State<'_, ExifToolWrapper>,
+) -> Result<Vec<ReadOutcome>, String> {
+    Ok(exiftool
+        .read_many(&file_paths)
+        .into_iter()
+        .zip(file_paths)
+        .map(|(result, file_path)| match result {
+            Ok(info) => ReadOutcome {
+                file_path,
+                info: Some(info),
+                error: None,
+            },
+            Err(error) => ReadOutcome {
+                file_path,
+                info: None,
+                error: Some(error),
+            },
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -60,9 +76,8 @@ pub async fn clean_file_metadata(
     preserve_orientation: bool,
     preserve_color_profile: bool,
     preserve_modification_date: bool,
-    state: State<'_, AppState>,
+    exiftool: State<'_, ExifToolWrapper>,
 ) -> Result<CleanResult, String> {
-    let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
     exiftool.clean_metadata(
         &file_path,
         overwrite,
@@ -70,62 +85,6 @@ pub async fn clean_file_metadata(
         preserve_color_profile,
         preserve_modification_date,
     )
-}
-
-#[tauri::command]
-pub async fn clean_file_selective(
-    file_path: String,
-    tags: Vec<String>,
-    overwrite: bool,
-    preserve_modification_date: bool,
-    state: State<'_, AppState>,
-) -> Result<CleanResult, String> {
-    let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
-    exiftool.clean_selective(&file_path, tags, overwrite, preserve_modification_date)
-}
-
-#[tauri::command]
-pub async fn clean_multiple_files(
-    file_paths: Vec<String>,
-    overwrite: bool,
-    preserve_orientation: bool,
-    preserve_color_profile: bool,
-    preserve_modification_date: bool,
-    state: State<'_, AppState>,
-) -> Result<Vec<CleanResult>, String> {
-    let results: Vec<CleanResult> = file_paths
-        .par_iter()
-        .filter_map(|file_path| {
-            let exiftool = state.exiftool.lock().ok()?;
-            exiftool
-                .clean_metadata(
-                    file_path,
-                    overwrite,
-                    preserve_orientation,
-                    preserve_color_profile,
-                    preserve_modification_date,
-                )
-                .ok()
-        })
-        .collect();
-
-    Ok(results)
-}
-
-#[tauri::command]
-pub async fn read_multiple_metadata(
-    file_paths: Vec<String>,
-    state: State<'_, AppState>,
-) -> Result<Vec<MetadataInfo>, String> {
-    let results: Vec<MetadataInfo> = file_paths
-        .par_iter()
-        .filter_map(|file_path| {
-            let exiftool = state.exiftool.lock().ok()?;
-            exiftool.read_metadata(file_path).ok()
-        })
-        .collect();
-
-    Ok(results)
 }
 
 #[tauri::command]
