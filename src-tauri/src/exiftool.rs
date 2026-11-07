@@ -46,6 +46,13 @@ const QUICKTIME_DATES: &[&str] = &[
     "MediaModifyDate",
 ];
 
+// A copy must stay as private as the file it was made from.
+fn copy_permissions(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::metadata(from)
+        .and_then(|metadata| std::fs::set_permissions(to, metadata.permissions()))
+        .map_err(|e| format!("Failed to copy file permissions: {}", e))
+}
+
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!(".{}.metadatazero-{}.pdf", stem, suffix))
@@ -200,7 +207,11 @@ impl ExifToolWrapper {
                 args.push(output_path.clone());
             }
             args.push(file_path.to_string());
-            return self.run_exiftool(&args).map(|_| output_path);
+            self.run_exiftool(&args)?;
+            if !overwrite {
+                copy_permissions(path, Path::new(&output_path))?;
+            }
+            return Ok(output_path);
         }
 
         if !overwrite && Path::new(&output_path).exists() {
@@ -220,6 +231,7 @@ impl ExifToolWrapper {
         let result = self
             .run_exiftool(&args)
             .and_then(|_| self.rewrite_pdf(&edited, &rewritten))
+            .and_then(|_| copy_permissions(path, &rewritten))
             .and_then(|_| std::fs::rename(&rewritten, &output_path).map_err(|e| e.to_string()));
 
         let _ = std::fs::remove_file(&edited);
@@ -626,6 +638,41 @@ mod tests {
             std::fs::read(dir.join("photo_metadatazero.jpg")).unwrap(),
             b"keep me"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copies_stay_as_private_as_the_original() {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["photo.jpg", "video.mp4"] {
+            let dir = scratch(&format!("private-{}", name));
+            let original = fixture(name, &dir);
+            std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let result = wrapper()
+                .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+                .unwrap();
+            assert!(result.success, "{}", result.message);
+            let mode = std::fs::metadata(&result.output_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "{}", name);
+        }
+        let dir = scratch("private-pdf");
+        let original = dir.join("lease.pdf");
+        write_pdf(&original);
+        std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o600)).unwrap();
+        for overwrite in [false, true] {
+            let result = wrapper()
+                .clean_metadata(original.to_str().unwrap(), overwrite, false, false, false)
+                .unwrap();
+            assert!(result.success, "{}", result.message);
+            let mode = std::fs::metadata(&result.output_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "pdf overwrite={}", overwrite);
+        }
     }
 
     #[test]
