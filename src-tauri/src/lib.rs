@@ -28,6 +28,30 @@ fn paths_from_args(args: &[String], cwd: &Path) -> Vec<String> {
         .collect()
 }
 
+// The default size is taller than the space a 768 pixel screen leaves above the
+// taskbar, which would hide the clean button at the bottom of the window.
+fn fit_to_screen(window: &tauri::WebviewWindow) {
+    let (Ok(Some(monitor)), Ok(outer), Ok(inner)) =
+        (window.current_monitor(), window.outer_size(), window.inner_size())
+    else {
+        return;
+    };
+    let area = monitor.work_area();
+    if outer.width <= area.size.width && outer.height <= area.size.height {
+        return;
+    }
+    let width = outer.width.min(area.size.width);
+    let height = outer.height.min(area.size.height);
+    let _ = window.set_size(tauri::PhysicalSize::new(
+        width - (outer.width - inner.width),
+        height - (outer.height - inner.height),
+    ));
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        area.position.x + ((area.size.width - width) / 2) as i32,
+        area.position.y + ((area.size.height - height) / 2) as i32,
+    ));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -55,6 +79,10 @@ pub fn run() {
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_default();
             queue_files(app.handle(), paths_from_args(&args, &cwd));
+
+            if let Some(window) = app.get_webview_window("main") {
+                fit_to_screen(&window);
+            }
 
             #[cfg(target_os = "macos")]
             {
