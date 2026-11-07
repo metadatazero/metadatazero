@@ -1,10 +1,3 @@
-const HIDDEN_KEYS = [
-  'SourceFile', 'ExifToolVersion', 'FileName', 'Directory',
-  'FilePermissions', 'FileModifyDate', 'FileAccessDate',
-  'FileInodeChangeDate', 'FileSize', 'FileType', 'FileTypeExtension',
-  'MIMEType'
-];
-
 export type Metadata = Record<string, string>;
 
 export interface Reveal {
@@ -17,12 +10,8 @@ export interface Reveal {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export const visibleFields = (metadata: Metadata): Array<[string, string]> =>
-  Object.entries(metadata)
-    .filter(([key]) => !HIDDEN_KEYS.includes(key))
-    .map(([key, value]) => [key, unquote(value)]);
-
-export const fieldCount = (metadata: Metadata): number => visibleFields(metadata).length;
+export const removableFields = (metadata: Metadata, removable: string[]): Array<[string, string]> =>
+  removable.map((key) => [key, unquote(metadata[key] ?? '')]);
 
 const unquote = (value: string): string =>
   value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
@@ -45,8 +34,10 @@ const formatPosition = (metadata: Metadata): string | undefined => {
     ?? (metadata.GPSLatitude && metadata.GPSLongitude ? `${metadata.GPSLatitude}, ${metadata.GPSLongitude}` : undefined);
   if (!position) return undefined;
   const coordinates = position.split(',').map((part) => toDecimal(part.trim())).join(', ');
-  const altitude = metadata.GPSAltitude?.match(/^(-?[\d.]+) m/);
-  return altitude ? `${coordinates} · ${Math.round(Number(altitude[1]))} m` : coordinates;
+  const altitude = metadata.GPSAltitude?.match(/^(-?[\d.]+) m( Below)?/);
+  if (!altitude) return coordinates;
+  const meters = Math.round(Number(altitude[1])) * (altitude[2] ? -1 : 1);
+  return `${coordinates} · ${meters} m`;
 };
 
 const formatDate = (value: string, offset?: string): string => {
@@ -65,7 +56,10 @@ export const reveals = (metadata: Metadata): Reveal[] => {
     found.push({ label: 'Location', summary: 'Location', value: position, source: 'GPSPosition', leak: true });
   }
 
-  const name = first(metadata, ['Artist', 'Author', 'Creator', 'OwnerName', 'CameraOwnerName', 'XPAuthor', 'By-line', 'LastModifiedBy']);
+  // In a PDF, Creator is the app that made the document, not a person.
+  const isPdf = metadata.FileType === 'PDF';
+  const nameKeys = ['Artist', 'Author', 'OwnerName', 'CameraOwnerName', 'XPAuthor', 'By-line', 'LastModifiedBy'];
+  const name = first(metadata, isPdf ? nameKeys : [...nameKeys, 'Creator']);
   if (name) found.push({ label: 'Name', summary: 'Name', value: name[1], source: name[0], leak: true });
 
   const taken = first(metadata, ['DateTimeOriginal', 'CreateDate', 'MediaCreateDate', 'CreationDate']);
@@ -87,7 +81,7 @@ export const reveals = (metadata: Metadata): Reveal[] => {
   const lens = first(metadata, ['LensModel', 'Lens']);
   if (lens) found.push({ label: 'Lens', summary: 'lens', value: lens[1], source: lens[0], leak: false });
 
-  const software = first(metadata, ['Software', 'CreatorTool', 'Producer']);
+  const software = first(metadata, isPdf ? ['Software', 'CreatorTool', 'Creator', 'Producer'] : ['Software', 'CreatorTool', 'Producer']);
   if (software) found.push({ label: 'Software', summary: 'software', value: software[1], source: software[0], leak: false });
 
   return found;

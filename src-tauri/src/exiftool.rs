@@ -10,6 +10,7 @@ pub struct MetadataInfo {
     pub file_name: String,
     pub file_size: u64,
     pub metadata: HashMap<String, String>,
+    pub removable: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -126,31 +127,112 @@ fn clean_result(
     }
 }
 
+const PNG_IMAGE: &[&str] = &[
+    "ImageWidth",
+    "ImageHeight",
+    "BitDepth",
+    "ColorType",
+    "Compression",
+    "Filter",
+    "Interlace",
+    "Gamma",
+    "SRGBRendering",
+    "PixelsPerUnitX",
+    "PixelsPerUnitY",
+    "PixelUnits",
+    "WhitePointX",
+    "WhitePointY",
+    "RedX",
+    "RedY",
+    "GreenX",
+    "GreenY",
+    "BlueX",
+    "BlueY",
+];
+
+const TIFF_IMAGE: &[&str] = &[
+    "SubfileType",
+    "ImageWidth",
+    "ImageHeight",
+    "BitsPerSample",
+    "Compression",
+    "PhotometricInterpretation",
+    "FillOrder",
+    "StripOffsets",
+    "SamplesPerPixel",
+    "RowsPerStrip",
+    "StripByteCounts",
+    "XResolution",
+    "YResolution",
+    "PlanarConfiguration",
+    "ResolutionUnit",
+    "Predictor",
+    "ColorMap",
+    "TileWidth",
+    "TileLength",
+    "TileOffsets",
+    "TileByteCounts",
+    "ExtraSamples",
+    "SampleFormat",
+];
+
+// Fields that describe the file itself, such as its size, codec or pixel layout,
+// survive any cleaning and say nothing about the person, so they are not counted.
+fn is_structural(group0: &str, group1: &str, tag: &str, value: &str) -> bool {
+    if value == "0000:00:00 00:00:00" {
+        return true;
+    }
+    match group0 {
+        "ExifTool" | "File" | "Composite" | "ICC_Profile" | "" => true,
+        "QuickTime" => {
+            !matches!(group1, "Keys" | "ItemList" | "UserData") && !tag.ends_with("Date")
+        }
+        "PNG" => group1 == "PNG-cICP" || PNG_IMAGE.contains(&tag),
+        "EXIF" => group1 == "IFD0" && TIFF_IMAGE.contains(&tag),
+        "PDF" => matches!(tag, "PDFVersion" | "Linearized" | "PageCount" | "MediaBox"),
+        _ => false,
+    }
+}
+
 fn metadata_info(
     file_path: &str,
-    entry: HashMap<String, serde_json::Value>,
+    entry: serde_json::Map<String, serde_json::Value>,
 ) -> Result<MetadataInfo, String> {
     let path = Path::new(file_path);
     let file_size = std::fs::metadata(path)
         .map_err(|e| format!("Failed to read file metadata: {}", e))?
         .len();
-    let metadata = entry
-        .into_iter()
-        .filter_map(|(key, value)| {
-            let formatted = match value {
-                serde_json::Value::String(s) => s,
-                serde_json::Value::Number(n) => n.to_string(),
-                serde_json::Value::Bool(b) => b.to_string(),
-                serde_json::Value::Array(arr) => arr
-                    .iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                _ => return None,
-            };
-            Some((key, formatted))
-        })
-        .collect();
+    let mut metadata = HashMap::new();
+    let mut removable = Vec::new();
+    for (key, value) in entry {
+        let formatted = match value {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            _ => continue,
+        };
+        let mut parts = key.rsplitn(3, ':');
+        let tag = parts.next().unwrap_or_default().to_string();
+        let groups: Vec<&str> = parts.collect();
+        let (group0, group1) = match groups.as_slice() {
+            [group1, group0] => (*group0, *group1),
+            [group0] => (*group0, *group0),
+            _ => ("", ""),
+        };
+        // The same tag can sit in several groups; the value shown is the first one the
+        // cleaning would remove, not a structural copy such as a zeroed QuickTime date.
+        if !is_structural(group0, group1, &tag, &formatted) && !removable.contains(&tag) {
+            removable.push(tag.clone());
+            metadata.insert(tag, formatted);
+        } else {
+            metadata.entry(tag).or_insert(formatted);
+        }
+    }
     Ok(MetadataInfo {
         file_path: file_path.to_string(),
         file_name: path
@@ -160,6 +242,7 @@ fn metadata_info(
             .to_string(),
         file_size,
         metadata,
+        removable,
     })
 }
 
@@ -299,7 +382,7 @@ impl ExifToolWrapper {
     // reading a file. Results come back in the order of `file_paths`.
     pub fn read_many(&self, file_paths: &[String]) -> Vec<Result<MetadataInfo, String>> {
         let output = match Command::new(&self.exiftool_path)
-            .args(["-json", "-a", "-s"])
+            .args(["-json", "-a", "-s", "-G0:1"])
             .args(file_paths)
             .output()
         {
@@ -311,10 +394,10 @@ impl ExifToolWrapper {
         };
 
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let entries: Vec<HashMap<String, serde_json::Value>> =
+        let entries: Vec<serde_json::Map<String, serde_json::Value>> =
             serde_json::from_slice(&output.stdout).unwrap_or_default();
         let normalize = |path: &str| path.replace('\\', "/");
-        let mut by_path: HashMap<String, HashMap<String, serde_json::Value>> = entries
+        let mut by_path: HashMap<String, serde_json::Map<String, serde_json::Value>> = entries
             .into_iter()
             .filter_map(|entry| {
                 let source = entry.get("SourceFile")?.as_str()?.to_string();
@@ -332,7 +415,7 @@ impl ExifToolWrapper {
                         format!("ExifTool error: {}", stderr)
                     }
                 })?;
-                if let Some(error) = entry.get("Error").and_then(|e| e.as_str()) {
+                if let Some(error) = entry.get("ExifTool:Error").and_then(|e| e.as_str()) {
                     return Err(format!("ExifTool error: {}", error));
                 }
                 metadata_info(file_path, entry)
@@ -412,8 +495,8 @@ mod tests {
     fn write_pdf(path: &Path) {
         let objects = [
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R >>".to_string(),
             format!("<< /Author ({}) /Title (Lease agreement) >>", SECRET),
         ];
         let mut pdf = b"%PDF-1.4\n".to_vec();
@@ -683,6 +766,49 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "pdf overwrite={}", overwrite);
         }
+    }
+
+    fn removable(path: &Path) -> Vec<String> {
+        wrapper()
+            .read_many(&[path.to_string_lossy().to_string()])
+            .remove(0)
+            .unwrap()
+            .removable
+    }
+
+    #[test]
+    fn a_cleaned_file_has_nothing_left_to_remove() {
+        for name in [
+            "photo.jpg",
+            "photo.png",
+            "photo.tiff",
+            "photo.heic",
+            "video.mp4",
+        ] {
+            let dir = scratch(&format!("left-{}", name));
+            let original = fixture(name, &dir);
+            assert!(
+                removable(&original).contains(&"Artist".to_string()),
+                "{}",
+                name
+            );
+            let result = wrapper()
+                .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+                .unwrap();
+            assert!(result.success, "{}", result.message);
+            let left = removable(Path::new(&result.output_path));
+            assert!(left.is_empty(), "{} still counts {:?}", name, left);
+        }
+        let dir = scratch("left-pdf");
+        let original = dir.join("lease.pdf");
+        write_pdf(&original);
+        assert!(removable(&original).contains(&"Author".to_string()));
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+            .unwrap();
+        assert!(result.success, "{}", result.message);
+        let left = removable(Path::new(&result.output_path));
+        assert!(left.is_empty(), "pdf still counts {:?}", left);
     }
 
     #[test]

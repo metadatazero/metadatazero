@@ -11,8 +11,8 @@ import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/martian-mono";
 import "./App.css";
 import {
-  Metadata, Reveal, baseName, copyName, fieldCount, fileKind, fileType, folderOf,
-  formatSize, reveals, summary, visibleFields,
+  Metadata, Reveal, baseName, copyName, fileKind, fileType, folderOf,
+  formatSize, removableFields, reveals, summary,
 } from "./metadata";
 
 type SaveMode = 'copy' | 'overwrite';
@@ -22,6 +22,7 @@ interface FileItem {
   name: string;
   size: number;
   metadata?: Metadata;
+  fields?: Array<[string, string]>;
   loading: boolean;
   readError?: string;
   status: 'pending' | 'processing' | 'cleaned' | 'failed';
@@ -39,7 +40,7 @@ interface PreservationOptions {
 
 interface ReadOutcome {
   file_path: string;
-  info?: { file_size: number; metadata: Metadata };
+  info?: { file_size: number; metadata: Metadata; removable: string[] };
   error?: string;
 }
 
@@ -67,6 +68,16 @@ const loadJson = <T,>(key: string, fallback: T): T => {
 };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// The color profile is not counted as personal metadata, but the settings decide
+// whether it goes, so it is listed with what will be removed. HEIC cannot drop it,
+// and in a PDF it belongs to the page content.
+const fieldsToRemove = (file: FileItem, keep: PreservationOptions): Array<[string, string]> => {
+  const fields = (file.fields ?? []).filter(([key]) => !(keep.orientation && key === 'Orientation'));
+  const profile = file.metadata?.ProfileDescription ?? file.metadata?.ProfileName;
+  if (profile && !keep.colorProfile && !['HEIC', 'PDF'].includes(file.metadata?.FileType ?? '')) fields.push(['ICC_Profile', profile]);
+  return fields;
+};
 
 const keptLabels = (options: PreservationOptions): string[] => [
   options.orientation && 'orientation',
@@ -154,7 +165,7 @@ function App() {
           const outcomes = await invoke<ReadOutcome[]>("read_files_metadata", { filePaths: batch });
           for (const { file_path, info, error } of outcomes) {
             updateFile(file_path, info
-              ? { metadata: info.metadata, size: info.file_size, loading: false }
+              ? { metadata: info.metadata, fields: removableFields(info.metadata, info.removable), size: info.file_size, loading: false }
               : { readError: error, loading: false });
           }
         } catch (error) {
@@ -244,7 +255,7 @@ function App() {
 
   const selected = files.find((f) => f.path === selectedPath) ?? null;
   const remaining = files.filter((f) => f.status !== 'cleaned' && !f.readError);
-  const remainingFields = remaining.reduce((sum, f) => sum + (f.metadata ? fieldCount(f.metadata) : 0), 0);
+  const remainingFields = remaining.reduce((sum, f) => sum + fieldsToRemove(f, preservationOptions).length, 0);
 
   return (
     <div className="app">
@@ -324,6 +335,7 @@ function App() {
                   file={file}
                   color={THUMBNAIL_COLORS[index % THUMBNAIL_COLORS.length]}
                   selected={file.path === selectedPath}
+                  count={fieldsToRemove(file, preservationOptions).length}
                   removable={!processing}
                   onSelect={() => setSelectedPath(file.path)}
                   onRemove={() => removeFile(file.path)}
@@ -357,6 +369,7 @@ function App() {
             {selected && (
               <FileDetail
                 file={selected}
+                fields={fieldsToRemove(selected, preservationOptions)}
                 processing={processing}
                 onClean={() => cleanFiles([selected])}
               />
@@ -410,10 +423,11 @@ function App() {
   );
 }
 
-function FileRow({ file, color, selected, removable, onSelect, onRemove }: {
+function FileRow({ file, color, selected, count, removable, onSelect, onRemove }: {
   file: FileItem;
   color: string;
   selected: boolean;
+  count: number;
   removable: boolean;
   onSelect: () => void;
   onRemove: () => void;
@@ -452,7 +466,7 @@ function FileRow({ file, color, selected, removable, onSelect, onRemove }: {
           <span className="file-detail">{detail}</span>
         </span>
         <span className={`field-count ${cleaned ? 'marker' : ''}`}>
-          {busy ? '…' : cleaned ? '0' : file.metadata ? fieldCount(file.metadata) : ''}
+          {busy ? '…' : cleaned ? '0' : file.metadata ? count : ''}
         </span>
       </button>
       <button
@@ -470,14 +484,14 @@ function FileRow({ file, color, selected, removable, onSelect, onRemove }: {
   );
 }
 
-function FileDetail({ file, processing, onClean }: {
+function FileDetail({ file, fields, processing, onClean }: {
   file: FileItem;
+  fields: Array<[string, string]>;
   processing: boolean;
   onClean: () => void;
 }) {
   const cleaned = file.status === 'cleaned';
   const found: Reveal[] = file.metadata ? reveals(file.metadata) : [];
-  const fields = file.metadata ? visibleFields(file.metadata) : [];
 
   const subtitle = cleaned
     ? file.savedAs === 'overwrite' ? 'Original replaced' : `Saved as ${baseName(file.savedTo ?? '')}`
@@ -514,7 +528,9 @@ function FileDetail({ file, processing, onClean }: {
           <div className="counter">
             <span className={`counter-number ${cleaned ? 'marker' : ''}`}>{cleaned ? 0 : fields.length}</span>
             <span className="counter-label">
-              {cleaned ? 'metadata fields left' : <>metadata fields<br />in this {fileKind(file.metadata)}</>}
+              {cleaned
+                ? kept.length > 0 ? <>metadata fields left<br />besides what you kept</> : 'metadata fields left'
+                : <>metadata fields<br />in this {fileKind(file.metadata)}</>}
             </span>
           </div>
 
