@@ -30,6 +30,22 @@ fn is_pdf(path: &Path) -> bool {
         .is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("pdf"))
 }
 
+const QUICKTIME_EXTENSIONS: &[&str] = &[
+    "3g2", "3gp2", "3gp", "3gpp", "aax", "f4a", "f4b", "f4p", "f4v", "lrv", "m4a", "m4b", "m4p",
+    "m4v", "mov", "mp4", "mqv", "qt",
+];
+
+// QuickTime keeps these dates in the movie and track headers, which -all= cannot
+// delete, so they are zeroed instead.
+const QUICKTIME_DATES: &[&str] = &[
+    "QuickTime:CreateDate",
+    "QuickTime:ModifyDate",
+    "TrackCreateDate",
+    "TrackModifyDate",
+    "MediaCreateDate",
+    "MediaModifyDate",
+];
+
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!(".{}.metadatazero-{}.pdf", stem, suffix))
@@ -305,6 +321,14 @@ impl ExifToolWrapper {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if ext_lower == "tif" || ext_lower == "tiff" {
                 args.push("-CommonIFD0=".to_string());
+                if !preserve_orientation {
+                    args.push("-IFD0:Orientation=".to_string());
+                }
+            }
+            if QUICKTIME_EXTENSIONS.contains(&ext_lower.as_str()) {
+                for tag in QUICKTIME_DATES {
+                    args.push(format!("-{}=0000:00:00 00:00:00", tag));
+                }
             }
         }
 
