@@ -22,6 +22,17 @@ pub struct CleanResult {
 
 pub struct ExifToolWrapper {
     exiftool_path: PathBuf,
+    qpdf_path: PathBuf,
+}
+
+fn is_pdf(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("pdf"))
+}
+
+fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    path.with_file_name(format!(".{}.metadatazero-{}.pdf", stem, suffix))
 }
 
 fn output_path_for(path: &Path, overwrite: bool) -> Result<String, String> {
@@ -38,6 +49,29 @@ fn output_path_for(path: &Path, overwrite: bool) -> Result<String, String> {
         None => format!("{}_metadatazero", file_stem),
     };
     Ok(parent.join(output_name).to_string_lossy().to_string())
+}
+
+fn clean_result(
+    file_path: &str,
+    overwrite: bool,
+    result: Result<String, String>,
+    done: String,
+) -> CleanResult {
+    let fallback = output_path_for(Path::new(file_path), overwrite).unwrap_or_default();
+    match result {
+        Ok(output_path) => CleanResult {
+            success: true,
+            file_path: file_path.to_string(),
+            output_path,
+            message: done,
+        },
+        Err(message) => CleanResult {
+            success: false,
+            file_path: file_path.to_string(),
+            output_path: fallback,
+            message,
+        },
+    }
 }
 
 impl ExifToolWrapper {
@@ -74,7 +108,118 @@ impl ExifToolWrapper {
             ));
         }
 
-        Ok(Self { exiftool_path })
+        let qpdf_name = if cfg!(target_os = "windows") {
+            "qpdf.exe"
+        } else {
+            "qpdf"
+        };
+        let qpdf_path = resource_path
+            .join("binaries")
+            .join("qpdf")
+            .join("bin")
+            .join(qpdf_name);
+
+        if !qpdf_path.exists() {
+            return Err(format!("QPDF binary not found at: {}", qpdf_path.display()));
+        }
+
+        Ok(Self {
+            exiftool_path,
+            qpdf_path,
+        })
+    }
+
+    fn run_exiftool(&self, args: &[String]) -> Result<(), String> {
+        let output = Command::new(&self.exiftool_path)
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to execute exiftool: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    }
+
+    // QPDF exits with 3 when it succeeds with warnings, which damaged but readable
+    // PDFs often trigger.
+    fn rewrite_pdf(&self, input: &Path, output: &Path) -> Result<(), String> {
+        let result = Command::new(&self.qpdf_path)
+            .arg(input)
+            .arg(output)
+            .output()
+            .map_err(|e| format!("Failed to execute qpdf: {}", e))?;
+        match result.status.code() {
+            Some(0) | Some(3) => Ok(()),
+            _ => Err(format!(
+                "QPDF could not rewrite the PDF: {}",
+                String::from_utf8_lossy(&result.stderr)
+            )),
+        }
+    }
+
+    // ExifTool edits a PDF by appending an update, so the removed values stay in the
+    // file and can be restored. QPDF rewrites only the objects still in use, which
+    // drops them for good. Both steps write to temporary files next to the original
+    // so a failure never leaves a half-cleaned file behind.
+    fn write_cleaned(
+        &self,
+        file_path: &str,
+        mut args: Vec<String>,
+        overwrite: bool,
+        preserve_modification_date: bool,
+    ) -> Result<String, String> {
+        let path = Path::new(file_path);
+        let output_path = output_path_for(path, overwrite)?;
+
+        if preserve_modification_date {
+            args.push("-P".to_string());
+        }
+
+        if !is_pdf(path) {
+            if overwrite {
+                args.push("-overwrite_original".to_string());
+            } else {
+                args.push("-o".to_string());
+                args.push(output_path.clone());
+            }
+            args.push(file_path.to_string());
+            return self.run_exiftool(&args).map(|_| output_path);
+        }
+
+        if !overwrite && Path::new(&output_path).exists() {
+            return Err(format!("{} already exists", output_path));
+        }
+
+        let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let edited = sibling(path, "edited");
+        let rewritten = sibling(path, "rewritten");
+        let _ = std::fs::remove_file(&edited);
+        let _ = std::fs::remove_file(&rewritten);
+
+        args.push("-o".to_string());
+        args.push(edited.to_string_lossy().to_string());
+        args.push(file_path.to_string());
+
+        let result = self
+            .run_exiftool(&args)
+            .and_then(|_| self.rewrite_pdf(&edited, &rewritten))
+            .and_then(|_| std::fs::rename(&rewritten, &output_path).map_err(|e| e.to_string()));
+
+        let _ = std::fs::remove_file(&edited);
+        let _ = std::fs::remove_file(&rewritten);
+        result?;
+
+        if preserve_modification_date {
+            if let Some(time) = modified {
+                let _ = std::fs::File::options()
+                    .write(true)
+                    .open(&output_path)
+                    .and_then(|file| file.set_modified(time));
+            }
+        }
+
+        Ok(output_path)
     }
 
     pub fn version(&self) -> Result<String, String> {
@@ -154,64 +299,36 @@ impl ExifToolWrapper {
             return Err(format!("File not found: {}", file_path));
         }
 
-        let output_path = output_path_for(path, overwrite)?;
-
-        let mut args = vec!["-all="];
+        let mut args = vec!["-all=".to_string()];
 
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if ext_lower == "tif" || ext_lower == "tiff" {
-                args.push("-CommonIFD0=");
+                args.push("-CommonIFD0=".to_string());
             }
         }
 
-        let has_preserved_tags = preserve_orientation || preserve_color_profile;
-        if has_preserved_tags {
-            args.push("-tagsfromfile");
-            args.push("@");
+        if preserve_orientation || preserve_color_profile {
+            args.push("-tagsfromfile".to_string());
+            args.push("@".to_string());
 
             if preserve_orientation {
-                args.push("-Orientation");
+                args.push("-Orientation".to_string());
             }
 
             if preserve_color_profile {
-                args.push("-ColorSpaceTags");
-                args.push("-ICCProfile");
+                args.push("-ColorSpaceTags".to_string());
+                args.push("-ICCProfile".to_string());
             }
         }
 
-        if preserve_modification_date {
-            args.push("-P");
-        }
-
-        if overwrite {
-            args.push("-overwrite_original");
-        } else {
-            args.push("-o");
-            args.push(&output_path);
-        }
-
-        args.push(file_path);
-
-        let output = Command::new(&self.exiftool_path)
-            .args(&args)
-            .output()
-            .map_err(|e| format!("Failed to execute exiftool: {}", e))?;
-
-        let success = output.status.success();
-
-        let message = if success {
-            "Metadata cleaned successfully".to_string()
-        } else {
-            String::from_utf8_lossy(&output.stderr).to_string()
-        };
-
-        Ok(CleanResult {
-            success,
-            file_path: file_path.to_string(),
-            output_path: output_path.clone(),
-            message,
-        })
+        let result = self.write_cleaned(file_path, args, overwrite, preserve_modification_date);
+        Ok(clean_result(
+            file_path,
+            overwrite,
+            result,
+            "Metadata cleaned successfully".to_string(),
+        ))
     }
 
     pub fn clean_selective(
@@ -221,51 +338,153 @@ impl ExifToolWrapper {
         overwrite: bool,
         preserve_modification_date: bool,
     ) -> Result<CleanResult, String> {
-        let path = Path::new(file_path);
-        if !path.exists() {
+        if !Path::new(file_path).exists() {
             return Err(format!("File not found: {}", file_path));
         }
 
-        let output_path = output_path_for(path, overwrite)?;
-
-        let mut args = Vec::new();
         let tag_count = tags.len();
+        let args = tags.iter().map(|tag| format!("-{}=", tag)).collect();
+        let result = self.write_cleaned(file_path, args, overwrite, preserve_modification_date);
+        Ok(clean_result(
+            file_path,
+            overwrite,
+            result,
+            format!("Removed {} metadata tags", tag_count),
+        ))
+    }
+}
 
-        for tag in &tags {
-            args.push(format!("-{}=", tag));
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        if preserve_modification_date {
-            args.push("-P".to_string());
-        }
+    const SECRET: &str = "Camille Durand";
 
-        if overwrite {
-            args.push("-overwrite_original".to_string());
+    fn wrapper() -> ExifToolWrapper {
+        let binaries = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        let exiftool = if cfg!(target_os = "windows") {
+            "exiftool-x86_64-pc-windows-msvc.exe".to_string()
         } else {
-            args.push("-o".to_string());
-            args.push(output_path.clone());
-        }
-
-        args.push(file_path.to_string());
-
-        let output = Command::new(&self.exiftool_path)
-            .args(&args)
-            .output()
-            .map_err(|e| format!("Failed to execute exiftool: {}", e))?;
-
-        let success = output.status.success();
-
-        let message = if success {
-            format!("Removed {} metadata tags", tag_count)
-        } else {
-            String::from_utf8_lossy(&output.stderr).to_string()
+            let os = if cfg!(target_os = "macos") {
+                "apple-darwin"
+            } else {
+                "unknown-linux-gnu"
+            };
+            format!("exiftool-{}-{}", std::env::consts::ARCH, os)
         };
+        let qpdf = if cfg!(target_os = "windows") {
+            "qpdf.exe"
+        } else {
+            "qpdf"
+        };
+        ExifToolWrapper {
+            exiftool_path: binaries.join(exiftool),
+            qpdf_path: binaries.join("qpdf").join("bin").join(qpdf),
+        }
+    }
 
-        Ok(CleanResult {
-            success,
-            file_path: file_path.to_string(),
-            output_path: output_path.clone(),
-            message,
-        })
+    fn write_pdf(path: &Path) {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>".to_string(),
+            format!("<< /Author ({}) /Title (Lease agreement) >>", SECRET),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend(format!("{} 0 obj\n{}\nendobj\n", i + 1, body).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            pdf.extend(format!("{:010} 00000 n \n", offset).as_bytes());
+        }
+        pdf.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R /Info 4 0 R >>\nstartxref\n{}\n%%EOF\n",
+                objects.len() + 1,
+                xref
+            )
+            .as_bytes(),
+        );
+        std::fs::write(path, pdf).unwrap();
+    }
+
+    fn contains_secret(path: &Path) -> bool {
+        let bytes = std::fs::read(path).unwrap();
+        bytes.windows(SECRET.len()).any(|w| w == SECRET.as_bytes())
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("metadatazero-test-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn exiftool_alone_leaves_pdf_metadata_recoverable() {
+        let dir = scratch("exiftool-alone");
+        let original = dir.join("lease.pdf");
+        let edited = dir.join("edited.pdf");
+        write_pdf(&original);
+
+        wrapper()
+            .run_exiftool(&[
+                "-all=".into(),
+                "-o".into(),
+                edited.to_string_lossy().into(),
+                original.to_string_lossy().into(),
+            ])
+            .unwrap();
+
+        assert!(contains_secret(&edited));
+    }
+
+    #[test]
+    fn cleaned_pdf_copy_has_no_trace_of_the_metadata() {
+        let dir = scratch("copy");
+        let original = dir.join("lease.pdf");
+        write_pdf(&original);
+
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+            .unwrap();
+
+        assert!(result.success, "{}", result.message);
+        let copy = dir.join("lease_metadatazero.pdf");
+        assert_eq!(Path::new(&result.output_path), copy);
+        assert!(!contains_secret(&copy));
+        assert!(contains_secret(&original));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn replaced_pdf_keeps_its_date_and_loses_the_metadata() {
+        let dir = scratch("replace");
+        let original = dir.join("lease.pdf");
+        write_pdf(&original);
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&original)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), true, false, false, true)
+            .unwrap();
+
+        assert!(result.success, "{}", result.message);
+        assert!(!contains_secret(&original));
+        assert_eq!(
+            std::fs::metadata(&original).unwrap().modified().unwrap(),
+            old
+        );
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     }
 }
