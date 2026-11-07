@@ -105,11 +105,9 @@ export const formatSize = (bytes: number): string => {
 export const baseName = (path: string): string => path.split(/[\\/]/).pop() || path;
 
 export const folderOf = (path: string): string => {
-  const parts = path.split(/[\\/]/);
-  parts.pop();
-  return parts.join('/')
-    .replace(/^\/(Users|home)\/[^/]+/, '~')
-    .replace(/^[A-Za-z]:\/Users\/[^/]+/, '~');
+  const folder = path.replace(/[\\/][^\\/]*$/, '');
+  if (!/^[A-Za-z]:\\|^\\\\/.test(path)) return folder.replace(/^\/(Users|home)\/[^/]+/, '~');
+  return folder.replace(/^[A-Za-z]:\\Users\\[^\\]+\\/i, '');
 };
 
 export const copyName = (fileName: string): string => {
