@@ -127,6 +127,11 @@ fn clean_result(
     }
 }
 
+// The QPDF build for macOS needs an OpenSSL module it does not ship to decrypt RC4,
+// the encryption older PDF writers used to lock printing or copying.
+const OLD_ENCRYPTION: &str =
+    "This PDF is protected with an old encryption that MetadataZero cannot rewrite yet. The file was not changed.";
+
 const PNG_IMAGE: &[&str] = &[
     "ImageWidth",
     "ImageHeight",
@@ -292,12 +297,11 @@ impl ExifToolWrapper {
             .arg(output)
             .output()
             .map_err(|e| format!("Failed to execute qpdf: {}", e))?;
+        let stderr = String::from_utf8_lossy(&result.stderr);
         match result.status.code() {
             Some(0) | Some(3) => Ok(()),
-            _ => Err(format!(
-                "QPDF could not rewrite the PDF: {}",
-                String::from_utf8_lossy(&result.stderr)
-            )),
+            _ if stderr.contains("legacy provider") => Err(OLD_ENCRYPTION.to_string()),
+            _ => Err(format!("QPDF could not rewrite the PDF: {}", stderr)),
         }
     }
 
@@ -872,5 +876,27 @@ mod tests {
             old
         );
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    // The macOS QPDF build cannot decrypt RC4 until upstream ships the OpenSSL
+    // legacy provider. When it can, this test checks the cleaning instead.
+    #[test]
+    fn rc4_pdf_is_cleaned_or_left_untouched_with_a_clear_message() {
+        let dir = scratch("rc4");
+        let original = fixture("rc4.pdf", &dir);
+        let before = std::fs::read(&original).unwrap();
+        assert!(removable(&original).contains(&"Author".to_string()));
+
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+            .unwrap();
+
+        if result.success {
+            assert!(removable(Path::new(&result.output_path)).is_empty());
+        } else {
+            assert_eq!(result.message, OLD_ENCRYPTION);
+            assert_eq!(std::fs::read(&original).unwrap(), before);
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        }
     }
 }
