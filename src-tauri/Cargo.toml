@@ -31,3 +31,6 @@ regex = "=1.13.1"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "=2.14.1"
 tauri-plugin-process = "=2.4.0"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))'.dependencies]
+tauri-plugin-single-instance = "=2.5.5"

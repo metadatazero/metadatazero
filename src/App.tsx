@@ -166,9 +166,14 @@ function App() {
       }
     });
     const unlistenSettings = listen("open-settings", () => setShowSettings(true));
+    const openPending = () =>
+      invoke<string[]>("take_pending_files").then((paths) => { if (paths.length > 0) handleFiles(paths); });
+    const unlistenOpen = listen("open-files", openPending);
+    openPending();
     return () => {
       unlistenDrop.then((unlisten) => unlisten());
       unlistenSettings.then((unlisten) => unlisten());
+      unlistenOpen.then((unlisten) => unlisten());
     };
   }, [handleFiles]);
 

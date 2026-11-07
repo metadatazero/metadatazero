@@ -3,16 +3,51 @@ mod exiftool;
 
 use commands::AppState;
 use exiftool::ExifToolWrapper;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::menu::MenuItem;
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
+
+#[derive(Default)]
+pub struct PendingFiles(pub Mutex<Vec<String>>);
+
+fn queue_files(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+    if let Ok(mut pending) = app.state::<PendingFiles>().0.lock() {
+        pending.extend(paths);
+    }
+    let _ = app.emit("open-files", ());
+}
+
+fn paths_from_args(args: &[String], cwd: &Path) -> Vec<String> {
+    args.iter()
+        .skip(1)
+        .map(|arg| cwd.join(arg))
+        .filter(|path| path.exists())
+        .map(|path| path.to_string_lossy().to_string())
+        .collect()
+}
 
 #[cfg(not(target_os = "macos"))]
 use tauri::menu::Menu;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        queue_files(app, paths_from_args(&args, Path::new(&cwd)));
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+
+    builder
+        .manage(PendingFiles::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
@@ -23,6 +58,10 @@ pub fn run() {
             app.manage(AppState {
                 exiftool: Arc::new(Mutex::new(exiftool)),
             });
+
+            let args: Vec<String> = std::env::args().collect();
+            let cwd = std::env::current_dir().unwrap_or_default();
+            queue_files(app.handle(), paths_from_args(&args, &cwd));
 
             #[cfg(target_os = "macos")]
             {
@@ -107,6 +146,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::exiftool_version,
+            commands::take_pending_files,
             commands::read_file_metadata,
             commands::clean_file_metadata,
             commands::clean_file_selective,
@@ -114,6 +154,17 @@ pub fn run() {
             commands::read_multiple_metadata,
             commands::expand_paths,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                let paths = urls
+                    .into_iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .filter_map(|path| path.to_str().map(String::from))
+                    .collect();
+                queue_files(_app, paths);
+            }
+        });
 }

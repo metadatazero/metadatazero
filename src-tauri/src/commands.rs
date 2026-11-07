@@ -30,6 +30,15 @@ fn is_supported_file(path: &Path) -> bool {
 }
 
 #[tauri::command]
+pub fn take_pending_files(pending: State<'_, crate::PendingFiles>) -> Vec<String> {
+    pending
+        .0
+        .lock()
+        .map(|mut files| std::mem::take(&mut *files))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
 pub async fn exiftool_version(state: State<'_, AppState>) -> Result<String, String> {
     let exiftool = state.exiftool.lock().map_err(|e| e.to_string())?;
     exiftool.version()
