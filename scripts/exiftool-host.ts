@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const EXIFTOOL_VERSION = '13.36';
-export const EXIFTOOL_SHA256 = 'f70ecbcdccc18268d4d3c290faf8cf73b1cf128e3e7f8671e24d6604cae4dc73';
-export const EXIFTOOL_WINDOWS_SHA256 = '6e2ba32f10883aec180f71cf257fd8ac7d4a9d12f7c23e0a965f6f4b7fa7d0e9';
+export const EXIFTOOL_VERSION = '13.55';
+export const EXIFTOOL_SHA256 = '5c9d422ad128fab728aacc5cc0aa77095d14cde74931389dd961d3d720e6b316';
+export const EXIFTOOL_WINDOWS_SHA256 = '9fadaf5221dcb07a5d018e21c8529e257917d2fad1fdfc8e64855c4fb73293df';
 
 export const BINARIES_DIR = path.join(import.meta.dirname, '..', 'src-tauri', 'binaries');
 export const LIB_DIR = path.join(BINARIES_DIR, 'lib');
