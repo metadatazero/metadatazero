@@ -197,8 +197,15 @@ fn is_structural(group0: &str, group1: &str, tag: &str, value: &str) -> bool {
         "PNG" => group1 == "PNG-cICP" || PNG_IMAGE.contains(&tag),
         "EXIF" => group1 == "IFD0" && TIFF_IMAGE.contains(&tag),
         "PDF" => {
-            matches!(tag, "PDFVersion" | "Linearized" | "PageCount" | "MediaBox")
-                || tag.starts_with("EmbeddedImage")
+            matches!(
+                tag,
+                "PDFVersion"
+                    | "Linearized"
+                    | "PageCount"
+                    | "MediaBox"
+                    | "Encryption"
+                    | "UserAccess"
+            ) || tag.starts_with("EmbeddedImage")
         }
         _ => false,
     }
@@ -1100,7 +1107,7 @@ mod tests {
     #[test]
     fn photos_placed_in_a_pdf_are_shown_and_cleaned() {
         let dir = scratch("pdf-photo");
-        let original = dir.join("report.pdf");
+        let original = dir.join("relevé 写真.pdf");
         write_pdf_with_photo(&original);
         let before = removable(&original);
         for key in ["Model", "GPSLatitude", "DateTimeOriginal", "Artist"] {
