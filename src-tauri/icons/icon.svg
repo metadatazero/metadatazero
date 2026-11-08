@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.2"/></filter>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#FBFBF9" filter="url(#shadow)"/>
+  <rect x="269" y="242" width="486" height="140.4" fill="#111111"/>
+  <rect x="269" y="441.8" width="351" height="140.4" fill="#FFE14D"/>
+  <rect x="269" y="641.6" width="405" height="140.4" fill="#111111"/>
+</svg>

@@ -8,8 +8,9 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import "@fontsource-variable/instrument-sans";
-import "@fontsource-variable/martian-mono";
+import "@fontsource-variable/public-sans";
+import "@fontsource/zilla-slab/600.css";
+import "@fontsource/zilla-slab/700.css";
 import "./App.css";
 import {
   Metadata, Reveal, baseName, copyName, fileKind, fileType, folderOf,
@@ -52,8 +53,6 @@ interface CleanResult {
   output_path: string;
   message: string;
 }
-
-const THUMBNAIL_COLORS = ['#B8C4D9', '#C9C2D6', '#D3CBBE', '#E2E4E8'];
 
 const userAgent = navigator.userAgent;
 const FILE_MANAGER = /Mac/.test(userAgent) ? 'Finder' : /Windows/.test(userAgent) ? 'File Explorer' : 'your file manager';
@@ -268,12 +267,10 @@ function App() {
     <div className="app">
       <header className="top-bar">
         <div className="brand">
-          <svg className="brand-mark" viewBox="0 0 1024 1024" aria-hidden="true">
-            <rect x="32" y="32" width="960" height="960" rx="176" fill="#2F3BFF" />
-            <path d="M302.3 162.5H616.9L768.3 313.9V814.9Q768.3 861.5 721.7 861.5H302.3Q255.7 861.5 255.7 814.9V209.1Q255.7 162.5 302.3 162.5Z" fill="#FFFFFF" />
-            <path d="M616.9 162.5V267.3Q616.9 313.9 663.5 313.9H768.3Z" fill="#C9CCFF" />
-            <rect x="407.1" y="407.1" width="209.7" height="349.5" rx="104.9" fill="none" stroke="#2F3BFF" strokeWidth="60.6" />
-            <line x1="432.3" y1="690.3" x2="591.7" y2="473.6" stroke="#2F3BFF" strokeWidth="55.7" strokeLinecap="round" />
+          <svg className="brand-mark" viewBox="0 0 20 20" aria-hidden="true">
+            <rect x="1.9" y="1" width="16.2" height="4.7" fill="#111111" />
+            <rect x="1.9" y="7.66" width="11.7" height="4.7" fill="#FFE14D" />
+            <rect x="1.9" y="14.3" width="13.5" height="4.7" fill="#111111" />
           </svg>
           <span className="brand-name">MetadataZero</span>
         </div>
@@ -306,7 +303,7 @@ function App() {
             <button className="btn-primary empty-choose" onClick={browseFiles}>Choose files</button>
             <div className="specimen">
               <div className="specimen-head">
-                <span className="eyebrow">A typical phone photo</span>
+                <span className="note">A typical phone photo</span>
                 <span className="specimen-count">45 fields</span>
               </div>
               {[
@@ -322,7 +319,7 @@ function App() {
               ))}
             </div>
           </div>
-          <p className="formats">JPG  HEIC  PNG  TIFF  RAW  MP4  MOV  PDF  and 80 more</p>
+          <p className="formats">JPG, HEIC, PNG, TIFF, RAW, MP4, MOV, PDF and 80 more formats</p>
         </main>
       ) : (
         <main className={`workspace ${dragActive ? 'drag-active' : ''}`}>
@@ -330,17 +327,16 @@ function App() {
             <div className="file-list-head">
               <span className="file-count">{plural(files.length, 'file')}</span>
               {remaining.length > 0
-                ? <span className="mono-note">{plural(remainingFields, 'field')}</span>
-                : <span className="mono-note marker">0 fields left</span>}
+                ? <span className="note">{plural(remainingFields, 'field')}</span>
+                : <span className="note">0 fields left</span>}
               <button className="btn" onClick={browseFiles}>Add files</button>
             </div>
 
             <div className="file-rows">
-              {files.map((file, index) => (
+              {files.map((file) => (
                 <FileRow
                   key={file.path}
                   file={file}
-                  color={THUMBNAIL_COLORS[index % THUMBNAIL_COLORS.length]}
                   selected={file.path === selectedPath}
                   count={fieldsToRemove(file, preservationOptions).length}
                   removable={!processing}
@@ -360,9 +356,9 @@ function App() {
                   >
                     {processing ? 'Removing metadata…' : `Remove metadata from ${plural(remaining.length, 'file')}`}
                   </button>
-                  <p className="mono-caption">
+                  <p className="caption">
                     {saveMode === 'copy'
-                      ? <>Copies are saved as{'  '}<span className="ink">name_metadatazero.jpg</span></>
+                      ? <>Copies are saved as <strong>name_metadatazero.jpg</strong></>
                       : 'Originals are replaced'}
                   </p>
                 </>
@@ -403,14 +399,10 @@ function App() {
         <div className="scrim centered">
           <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="consent-title">
             <h2 id="consent-title">Check for updates automatically?</h2>
-            <p className="dialog-text">
-              MetadataZero can check github.com for a new version each time it starts.
-              GitHub sees your IP address. Nothing about your files is sent.
-            </p>
-            <p className="dialog-hint">You can change this later in Settings.</p>
+            <p className="dialog-text">Checks for a new version when the app starts. Nothing about your files is sent.</p>
             <div className="dialog-buttons">
               <button className="btn btn-large" onClick={() => setAutoUpdate(false)}>Don't check</button>
-              <button className="btn btn-large" onClick={() => setAutoUpdate(true)}>Check automatically</button>
+              <button className="btn-primary" onClick={() => setAutoUpdate(true)}>Check automatically</button>
             </div>
           </div>
         </div>
@@ -430,9 +422,8 @@ function App() {
   );
 }
 
-function FileRow({ file, color, selected, count, removable, onSelect, onRemove }: {
+function FileRow({ file, selected, count, removable, onSelect, onRemove }: {
   file: FileItem;
-  color: string;
   selected: boolean;
   count: number;
   removable: boolean;
@@ -446,9 +437,9 @@ function FileRow({ file, color, selected, count, removable, onSelect, onRemove }
   if (cleaned) {
     detail = file.savedAs === 'overwrite' ? 'Original replaced' : 'Copy saved';
   } else if (file.readError) {
-    detail = <span className="leak">Can't read this file</span>;
+    detail = <span className="error">Can't read this file</span>;
   } else if (file.status === 'failed') {
-    detail = <span className="leak">Couldn't remove metadata</span>;
+    detail = <span className="error">Couldn't remove metadata</span>;
   } else {
     const items = file.metadata ? summary(file.metadata) : [];
     detail = (
@@ -467,12 +458,11 @@ function FileRow({ file, color, selected, count, removable, onSelect, onRemove }
   return (
     <div className={`file-row ${selected ? 'selected' : ''}`}>
       <button className="file-row-main" onClick={onSelect}>
-        <span className="thumbnail" style={{ background: color }} />
         <span className="file-text">
           <span className="file-name">{file.name}</span>
           <span className="file-detail">{detail}</span>
         </span>
-        <span className={`field-count ${cleaned ? 'marker' : ''}`}>
+        <span className="field-count">
           {busy ? '…' : cleaned ? '0' : file.metadata ? count : ''}
         </span>
       </button>
@@ -511,7 +501,7 @@ function FileDetail({ file, fields, processing, onClean }: {
       <div className="detail-head">
         <div className="detail-title">
           <h2>{file.name}</h2>
-          <p className="mono-note">{subtitle}</p>
+          <p className="note">{subtitle}</p>
         </div>
         {cleaned ? (
           <button className="btn btn-medium" onClick={() => revealItemInDir(file.savedTo ?? file.path)}>{SHOW_IN}</button>
@@ -529,11 +519,11 @@ function FileDetail({ file, fields, processing, onClean }: {
       {file.loading ? (
         <p className="detail-message">Reading metadata…</p>
       ) : file.readError ? (
-        <p className="detail-message leak">{file.readError}</p>
+        <p className="detail-message error">{file.readError}</p>
       ) : (
         <>
           <div className="counter">
-            <span className={`counter-number ${cleaned ? 'marker' : ''}`}>{cleaned ? 0 : fields.length}</span>
+            <span className="counter-number">{cleaned ? 0 : fields.length}</span>
             <span className="counter-label">
               {cleaned
                 ? kept.length > 0 ? <>metadata fields left<br />besides what you kept</> : 'metadata fields left'
@@ -541,21 +531,23 @@ function FileDetail({ file, fields, processing, onClean }: {
             </span>
           </div>
 
-          {file.status === 'failed' && <p className="detail-message leak">{file.cleanError}</p>}
+          {file.status === 'failed' && <p className="detail-message error">{file.cleanError}</p>}
 
           {found.length > 0 && (
             <section className="section">
-              <h3 className="eyebrow">{cleaned ? 'Removed' : 'What it reveals'}</h3>
+              <h3 className="heading">{cleaned ? 'Removed' : 'What it reveals'}</h3>
               <div className="reveal-rows">
-                {found.map((item) => (
+                {found.map((item, index) => (
                   <div className="reveal-row" key={item.label}>
                     <span className="row-label">{item.label}</span>
                     {cleaned ? (
-                      <span className="redaction" style={{ width: `${Math.min(item.value.length, 48) * 0.52}em` }} />
+                      <span className="reveal-value">
+                        <span className="redacted" aria-hidden="true" style={{ animationDelay: `${index * 90}ms` }}>{item.value}</span>
+                        <span className="visually-hidden">Removed</span>
+                      </span>
                     ) : (
-                      <span className={`reveal-value ${item.leak ? 'leak' : ''}`}>
-                        {item.label === 'Location' && <span className="leak-dot" />}
-                        {item.value}
+                      <span className="reveal-value">
+                        <span className={item.leak ? 'leak' : ''}>{item.value}</span>
                       </span>
                     )}
                     <span className="reveal-source">{item.source}</span>
@@ -567,7 +559,7 @@ function FileDetail({ file, fields, processing, onClean }: {
 
           {cleaned ? (
             <section className="section">
-              <h3 className="eyebrow">Kept</h3>
+              <h3 className="heading">Kept</h3>
               <p className="kept">
                 {kept.length === 0
                   ? 'Nothing. Choose what to keep, like orientation or color profile, in Settings.'
@@ -576,7 +568,7 @@ function FileDetail({ file, fields, processing, onClean }: {
             </section>
           ) : fields.length > 0 && (
             <section className="section">
-              <h3 className="eyebrow">All {fields.length} fields</h3>
+              <h3 className="heading">All {fields.length} fields</h3>
               <div className="field-grid">
                 {fields.map(([key, value]) => (
                   <div className="field" key={key}>
@@ -640,7 +632,7 @@ function SettingsSheet({
           <button className="btn btn-done" onClick={onClose}>Done</button>
         </div>
 
-        <h3 className="eyebrow sheet-section">When removing metadata, keep</h3>
+        <h3 className="heading sheet-section">When removing metadata, keep</h3>
         {keepRows.map(([key, title, description]) => (
           <div className="setting-row" key={key}>
             <div className="setting-text">
@@ -655,9 +647,9 @@ function SettingsSheet({
           </div>
         ))}
 
-        <h3 className="eyebrow sheet-section">Saving</h3>
+        <h3 className="heading sheet-section">Saving</h3>
         {([
-          ['copy', 'Keep the original, save a copy', <span className="mono-example">{exampleName}</span>],
+          ['copy', 'Keep the original, save a copy', <span className="example">{exampleName}</span>],
           ['overwrite', 'Replace the original', "The original metadata can't be recovered."],
         ] as const).map(([mode, title, description]) => (
           <label className="setting-row radio-row" key={mode}>
@@ -676,12 +668,12 @@ function SettingsSheet({
 
         {autoUpdate !== null && (
           <>
-            <h3 className="eyebrow sheet-section">Updates</h3>
+            <h3 className="heading sheet-section">Updates</h3>
             <div className="setting-row">
               <div className="setting-text">
                 <span className="setting-title">Check for updates automatically</span>
                 <span className="setting-description">
-                  Connects to github.com when the app starts. Nothing about your files is sent.
+                  Checks for a new version when the app starts. Nothing about your files is sent.
                 </span>
               </div>
               <Toggle label="Check for updates automatically" on={autoUpdate} onChange={onAutoUpdate} />
