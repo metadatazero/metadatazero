@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use tauri::Manager;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -277,11 +277,29 @@ impl ExifToolWrapper {
         })
     }
 
+    // Perl reads its Windows command line in the ANSI code page, which loses the
+    // characters of many file names, so there the arguments go through stdin as UTF-8.
+    fn exiftool(&self, args: &[String]) -> Result<Output, String> {
+        let fail = |e: std::io::Error| format!("Failed to execute exiftool: {}", e);
+        if cfg!(not(target_os = "windows")) {
+            return Command::new(&self.exiftool_path).args(args).output().map_err(fail);
+        }
+        let mut child = Command::new(&self.exiftool_path)
+            .args(["-charset", "filename=utf8", "-@", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(fail)?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(args.join("\n").as_bytes()).map_err(fail)?;
+        }
+        child.wait_with_output().map_err(fail)
+    }
+
     fn run_exiftool(&self, args: &[String]) -> Result<(), String> {
-        let output = Command::new(&self.exiftool_path)
-            .args(args)
-            .output()
-            .map_err(|e| format!("Failed to execute exiftool: {}", e))?;
+        let output = self.exiftool(args)?;
         if output.status.success() {
             Ok(())
         } else {
@@ -377,16 +395,14 @@ impl ExifToolWrapper {
     // One ExifTool run for many files: starting the packed binary costs far more than
     // reading a file. Results come back in the order of `file_paths`.
     pub fn read_many(&self, file_paths: &[String]) -> Vec<Result<MetadataInfo, String>> {
-        let output = match Command::new(&self.exiftool_path)
-            .args(["-json", "-a", "-s", "-G0:1"])
-            .args(file_paths)
-            .output()
-        {
+        let args: Vec<String> = ["-json", "-a", "-s", "-G0:1"]
+            .iter()
+            .map(|arg| arg.to_string())
+            .chain(file_paths.iter().cloned())
+            .collect();
+        let output = match self.exiftool(&args) {
             Ok(output) => output,
-            Err(e) => {
-                let message = format!("Failed to execute exiftool: {}", e);
-                return file_paths.iter().map(|_| Err(message.clone())).collect();
-            }
+            Err(message) => return file_paths.iter().map(|_| Err(message.clone())).collect(),
         };
 
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
