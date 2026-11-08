@@ -47,7 +47,7 @@ MetadataZero gives you control over this information with a simple drag-and-drop
 - **Batch Processing** - Clean multiple files simultaneously with parallel processing
 - **Fast & Lightweight** - Built with Rust for high-speed processing with minimal resource usage
 - **Visual Feedback** - Progress indicators and status updates for all operations
-- **Dark Mode** - Comfortable viewing in any lighting condition
+- **Dark Mode** - Follows your system appearance
 
 ## Demo
 

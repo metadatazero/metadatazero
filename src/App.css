@@ -5,10 +5,13 @@
   --graphite: #5e5f5a;
   --toner: #c9cac4;
   --highlight: #ffe14d;
+  --on-highlight: #111111;
   --stamp: #c42b1c;
+  --ink-hover: #2c2c2a;
   --display: 'Zilla Slab', Georgia, serif;
   --sans: 'Public Sans Variable', system-ui, sans-serif;
 
+  color-scheme: light dark;
   font-family: var(--sans);
   font-size: 14px;
   line-height: 1.25;
@@ -17,6 +20,18 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bond: #141413;
+    --sheet: #1c1c1a;
+    --ink: #edece7;
+    --graphite: #9c9d96;
+    --toner: #383835;
+    --stamp: #ff7a6b;
+    --ink-hover: #d6d5cf;
+  }
 }
 
 * {
@@ -50,10 +65,10 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-/* A highlighter stroke: what a file gives away. */
 .leak {
   padding: 0 2px;
   margin: 0 -2px;
+  color: var(--on-highlight);
   background: linear-gradient(transparent 14%, var(--highlight) 14%, var(--highlight) 90%, transparent 90%);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
@@ -128,7 +143,7 @@ input:focus-visible {
 }
 
 .btn-primary:not(:disabled):hover {
-  background: #2c2c2a;
+  background: var(--ink-hover);
 }
 
 .app {
@@ -155,6 +170,7 @@ input:focus-visible {
 .brand-mark {
   width: 20px;
   height: 20px;
+  color: var(--ink);
 }
 
 .brand-name {
@@ -288,9 +304,9 @@ input:focus-visible {
   color: var(--graphite);
 }
 
-/* A black marker bar drawn over a removed value. The text stays underneath, so
-   the bar is exactly as long as what it hides. */
-/* One bar per value, cut at the column edge, rather than a bar per wrapped line. */
+/* The text stays underneath so the bar is as long as the value. The ink half of a
+   double-width gradient slides in from just outside it: a zero-width background
+   leaves a sliver in WebKit. */
 .redacted {
   display: inline-block;
   max-width: 100%;
@@ -440,7 +456,7 @@ input:focus-visible {
 }
 
 .file-row:hover {
-  background: rgba(251, 251, 249, 0.55);
+  background: color-mix(in srgb, var(--sheet) 55%, transparent);
 }
 
 .file-row.selected {
@@ -474,7 +490,7 @@ input:focus-visible {
 }
 
 .file-detail .leak {
-  color: var(--ink);
+  color: var(--on-highlight);
 }
 
 .field-count {
@@ -629,7 +645,7 @@ input:focus-visible {
   grid-template-columns: 150px minmax(0, 1fr);
   align-items: baseline;
   padding: 7px 0;
-  border-top: 1px solid rgba(201, 202, 196, 0.5);
+  border-top: 1px solid color-mix(in srgb, var(--toner) 50%, transparent);
 }
 
 .field-key {

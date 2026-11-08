@@ -266,9 +266,9 @@ function App() {
       <header className="top-bar">
         <div className="brand">
           <svg className="brand-mark" viewBox="0 0 20 20" aria-hidden="true">
-            <rect x="1.9" y="1" width="16.2" height="4.7" fill="#111111" />
+            <rect x="1.9" y="1" width="16.2" height="4.7" fill="currentColor" />
             <rect x="1.9" y="7.66" width="11.7" height="4.7" fill="#FFE14D" />
-            <rect x="1.9" y="14.3" width="13.5" height="4.7" fill="#111111" />
+            <rect x="1.9" y="14.3" width="13.5" height="4.7" fill="currentColor" />
           </svg>
           <span className="brand-name">MetadataZero</span>
         </div>
