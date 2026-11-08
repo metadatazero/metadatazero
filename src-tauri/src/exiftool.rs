@@ -337,6 +337,11 @@ impl ExifToolWrapper {
         let path = Path::new(file_path);
         let output_path = output_path_for(path, overwrite)?;
 
+        if !overwrite && Path::new(&output_path).exists() {
+            let name = Path::new(&output_path).file_name().unwrap_or_default().to_string_lossy();
+            return Err(format!("{} already exists. Move or rename it, then try again.", name));
+        }
+
         if preserve_modification_date {
             args.push("-P".to_string());
         }
@@ -354,10 +359,6 @@ impl ExifToolWrapper {
                 copy_permissions(path, Path::new(&output_path))?;
             }
             return Ok(output_path);
-        }
-
-        if !overwrite && Path::new(&output_path).exists() {
-            return Err(format!("{} already exists", output_path));
         }
 
         let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
