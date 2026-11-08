@@ -189,13 +189,17 @@ fn is_structural(group0: &str, group1: &str, tag: &str, value: &str) -> bool {
         return true;
     }
     match group0 {
-        "ExifTool" | "File" | "Composite" | "ICC_Profile" | "" => true,
+        // APP14 tells decoders how a JPEG stores its colors, CMYK ones need it.
+        "ExifTool" | "File" | "Composite" | "ICC_Profile" | "APP14" | "" => true,
         "QuickTime" => {
             !matches!(group1, "Keys" | "ItemList" | "UserData") && !tag.ends_with("Date")
         }
         "PNG" => group1 == "PNG-cICP" || PNG_IMAGE.contains(&tag),
         "EXIF" => group1 == "IFD0" && TIFF_IMAGE.contains(&tag),
-        "PDF" => matches!(tag, "PDFVersion" | "Linearized" | "PageCount" | "MediaBox"),
+        "PDF" => {
+            matches!(tag, "PDFVersion" | "Linearized" | "PageCount" | "MediaBox")
+                || tag.starts_with("EmbeddedImage")
+        }
         _ => false,
     }
 }
@@ -283,7 +287,10 @@ impl ExifToolWrapper {
     fn exiftool(&self, args: &[String]) -> Result<Output, String> {
         let fail = |e: std::io::Error| format!("Failed to execute exiftool: {}", e);
         if cfg!(not(target_os = "windows")) {
-            return Command::new(&self.exiftool_path).args(args).output().map_err(fail);
+            return Command::new(&self.exiftool_path)
+                .args(args)
+                .output()
+                .map_err(fail);
         }
         let mut child = Command::new(&self.exiftool_path)
             .args(["-charset", "filename=utf8", "-@", "-"])
@@ -310,10 +317,9 @@ impl ExifToolWrapper {
 
     // QPDF exits with 3 when it succeeds with warnings, which damaged but readable
     // PDFs often trigger.
-    fn rewrite_pdf(&self, input: &Path, output: &Path) -> Result<(), String> {
+    fn qpdf(&self, args: &[std::ffi::OsString]) -> Result<(), String> {
         let result = Command::new(&self.qpdf_path)
-            .arg(input)
-            .arg(output)
+            .args(args)
             .output()
             .map_err(|e| format!("Failed to execute qpdf: {}", e))?;
         let stderr = String::from_utf8_lossy(&result.stderr);
@@ -324,10 +330,132 @@ impl ExifToolWrapper {
         }
     }
 
+    // ExifTool only edits the document's own metadata. A photo placed in a PDF is
+    // usually copied in as is, EXIF and GPS included, and so is the XMP attached to a
+    // page or an image. The color profile stays because viewers may use it to draw
+    // the photo.
+    fn clean_embedded(&self, pdf: &Path, dir: &Path) -> Result<Option<PathBuf>, String> {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let dump = dir.join("pdf.json");
+        let mut prefix = std::ffi::OsString::from("--json-stream-prefix=");
+        prefix.push(dir.join("stream"));
+        self.qpdf(&[
+            "--json-output".into(),
+            "--json-stream-data=file".into(),
+            prefix,
+            "--decode-level=none".into(),
+            pdf.into(),
+            dump.clone().into(),
+        ])?;
+
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&dump).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("QPDF wrote unreadable JSON: {}", e))?;
+        let mut changed = serde_json::Map::new();
+        let mut photos = Vec::new();
+        if let Some(objects) = json.pointer_mut("/qpdf/1").and_then(|o| o.as_object_mut()) {
+            for (key, object) in objects.iter_mut() {
+                let dict_path = if object.get("stream").is_some() {
+                    "/stream/dict"
+                } else {
+                    "/value"
+                };
+                let Some(dict) = object
+                    .pointer_mut(dict_path)
+                    .and_then(|d| d.as_object_mut())
+                else {
+                    continue;
+                };
+                let mut edited = dict.remove("/Metadata").is_some();
+                let filter = dict.get("/Filter");
+                let jpeg = filter.is_some_and(|f| {
+                    f == "/DCTDecode"
+                        || f.as_array()
+                            .is_some_and(|a| a.len() == 1 && a[0] == "/DCTDecode")
+                });
+                if jpeg {
+                    if let Some(file) = object.pointer("/stream/datafile").and_then(|f| f.as_str())
+                    {
+                        let photo = PathBuf::from(format!("{}.jpg", file));
+                        std::fs::rename(file, &photo).map_err(|e| e.to_string())?;
+                        object["stream"]["datafile"] = photo.to_string_lossy().into();
+                        photos.push(photo.to_string_lossy().to_string());
+                        edited = true;
+                    }
+                }
+                if edited {
+                    if let Some(stream) = object.get_mut("stream").and_then(|s| s.as_object_mut()) {
+                        if !jpeg {
+                            stream.remove("datafile");
+                        }
+                    }
+                    changed.insert(key.clone(), object.clone());
+                }
+            }
+        }
+        if changed.is_empty() {
+            return Ok(None);
+        }
+
+        if !photos.is_empty() {
+            let mut args: Vec<String> = [
+                "-all=",
+                "--ICC_Profile:all",
+                "-overwrite_original",
+                "-q",
+                "-q",
+            ]
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect();
+            args.extend(photos);
+            // A photo ExifTool cannot parse is left as it is; the check after the
+            // rewrite decides whether the PDF is clean.
+            self.exiftool(&args)?;
+        }
+
+        let header = json.pointer("/qpdf/0").cloned().unwrap_or_default();
+        let update = dir.join("update.json");
+        let body = serde_json::json!({ "qpdf": [header, changed] });
+        std::fs::write(&update, body.to_string()).map_err(|e| e.to_string())?;
+        Ok(Some(update))
+    }
+
+    fn rewrite_pdf(
+        &self,
+        input: &Path,
+        output: &Path,
+        update: Option<&Path>,
+    ) -> Result<(), String> {
+        let mut args: Vec<std::ffi::OsString> = vec![input.into(), output.into()];
+        if let Some(update) = update {
+            let mut arg = std::ffi::OsString::from("--update-from-json=");
+            arg.push(update);
+            args.push(arg);
+        }
+        self.qpdf(&args)
+    }
+
+    fn check_clean(&self, pdf: &Path) -> Result<(), String> {
+        let left = self
+            .read_many(&[pdf.to_string_lossy().to_string()])
+            .remove(0)?
+            .removable;
+        if left.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "MetadataZero could not remove {} from this PDF. The file was not changed.",
+                left.join(", ")
+            ))
+        }
+    }
+
     // ExifTool edits a PDF by appending an update, so the removed values stay in the
     // file and can be restored. QPDF rewrites only the objects still in use, which
-    // drops them for good. Both steps write to temporary files next to the original
-    // so a failure never leaves a half-cleaned file behind.
+    // drops them for good. Every step writes to temporary files next to the original
+    // so a failure never leaves a half-cleaned file behind, and a PDF that still
+    // holds something removable is never saved.
     fn write_cleaned(
         &self,
         file_path: &str,
@@ -339,8 +467,14 @@ impl ExifToolWrapper {
         let output_path = output_path_for(path, overwrite)?;
 
         if !overwrite && Path::new(&output_path).exists() {
-            let name = Path::new(&output_path).file_name().unwrap_or_default().to_string_lossy();
-            return Err(format!("{} already exists. Move or rename it, then try again.", name));
+            let name = Path::new(&output_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            return Err(format!(
+                "{} already exists. Move or rename it, then try again.",
+                name
+            ));
         }
 
         if preserve_modification_date {
@@ -365,8 +499,10 @@ impl ExifToolWrapper {
         let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
         let edited = sibling(path, "edited");
         let rewritten = sibling(path, "rewritten");
+        let streams = edited.with_extension("streams");
         let _ = std::fs::remove_file(&edited);
         let _ = std::fs::remove_file(&rewritten);
+        let _ = std::fs::remove_dir_all(&streams);
 
         args.push("-o".to_string());
         args.push(edited.to_string_lossy().to_string());
@@ -374,12 +510,15 @@ impl ExifToolWrapper {
 
         let result = self
             .run_exiftool(&args)
-            .and_then(|_| self.rewrite_pdf(&edited, &rewritten))
+            .and_then(|_| self.clean_embedded(&edited, &streams))
+            .and_then(|update| self.rewrite_pdf(&edited, &rewritten, update.as_deref()))
+            .and_then(|_| self.check_clean(&rewritten))
             .and_then(|_| copy_permissions(path, &rewritten))
             .and_then(|_| std::fs::rename(&rewritten, &output_path).map_err(|e| e.to_string()));
 
         let _ = std::fs::remove_file(&edited);
         let _ = std::fs::remove_file(&rewritten);
+        let _ = std::fs::remove_dir_all(&streams);
         result?;
 
         if preserve_modification_date {
@@ -394,22 +533,46 @@ impl ExifToolWrapper {
         Ok(output_path)
     }
 
-    // One ExifTool run for many files: starting the packed binary costs far more than
-    // reading a file. Results come back in the order of `file_paths`.
-    pub fn read_many(&self, file_paths: &[String]) -> Vec<Result<MetadataInfo, String>> {
+    fn read_entries(
+        &self,
+        file_paths: &[String],
+        embedded: bool,
+    ) -> Result<(Vec<serde_json::Map<String, serde_json::Value>>, String), String> {
+        if file_paths.is_empty() {
+            return Ok((Vec::new(), String::new()));
+        }
         let args: Vec<String> = ["-json", "-a", "-s", "-G0:1"]
             .iter()
             .map(|arg| arg.to_string())
+            .chain(embedded.then(|| "-ee".to_string()))
             .chain(file_paths.iter().cloned())
             .collect();
-        let output = match self.exiftool(&args) {
-            Ok(output) => output,
+        let output = self.exiftool(&args)?;
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Ok((
+            serde_json::from_slice(&output.stdout).unwrap_or_default(),
+            stderr,
+        ))
+    }
+
+    // One ExifTool run for many files: starting the packed binary costs far more than
+    // reading a file. PDFs get a second run with -ee, which reads the photos placed in
+    // them; on videos it would list every frame of a GPS track. Results come back in
+    // the order of `file_paths`.
+    pub fn read_many(&self, file_paths: &[String]) -> Vec<Result<MetadataInfo, String>> {
+        let (pdfs, others): (Vec<String>, Vec<String>) = file_paths
+            .iter()
+            .cloned()
+            .partition(|path| is_pdf(Path::new(path)));
+        let runs = self
+            .read_entries(&others, false)
+            .and_then(|a| self.read_entries(&pdfs, true).map(|b| (a, b)));
+        let ((mut entries, stderr_others), (pdf_entries, stderr_pdfs)) = match runs {
+            Ok(runs) => runs,
             Err(message) => return file_paths.iter().map(|_| Err(message.clone())).collect(),
         };
+        entries.extend(pdf_entries);
 
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let entries: Vec<serde_json::Map<String, serde_json::Value>> =
-            serde_json::from_slice(&output.stdout).unwrap_or_default();
         let normalize = |path: &str| path.replace('\\', "/");
         let mut by_path: HashMap<String, serde_json::Map<String, serde_json::Value>> = entries
             .into_iter()
@@ -422,6 +585,11 @@ impl ExifToolWrapper {
         file_paths
             .iter()
             .map(|file_path| {
+                let stderr = if is_pdf(Path::new(file_path)) {
+                    &stderr_pdfs
+                } else {
+                    &stderr_others
+                };
                 let entry = by_path.remove(&normalize(file_path)).ok_or_else(|| {
                     if stderr.is_empty() {
                         "ExifTool could not read this file".to_string()
@@ -507,17 +675,58 @@ mod tests {
     }
 
     fn write_pdf(path: &Path) {
-        let objects = [
-            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".to_string(),
-            "<< /Type /Page /Parent 2 0 R >>".to_string(),
-            format!("<< /Author ({}) /Title (Lease agreement) >>", SECRET),
-        ];
+        write_objects(
+            path,
+            &[
+                "<< /Type /Catalog /Pages 2 0 R >>".into(),
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".into(),
+                "<< /Type /Page /Parent 2 0 R >>".into(),
+                format!("<< /Author ({}) /Title (Lease agreement) >>", SECRET).into(),
+            ],
+        );
+    }
+
+    fn stream(dict: &str, data: &[u8]) -> Vec<u8> {
+        let mut object = format!("<< {} /Length {} >>\nstream\n", dict, data.len()).into_bytes();
+        object.extend(data);
+        object.extend(b"\nendstream");
+        object
+    }
+
+    const DRAW_PHOTO: &[u8] = b"q 64 0 0 64 0 0 cm /Im0 Do Q";
+
+    // The photo goes in byte for byte, as most PDF writers do, with XMP on the page
+    // and on its content stream.
+    fn write_pdf_with_photo(path: &Path) {
+        let photo =
+            std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/photo.jpg"))
+                .unwrap();
+        let xmp = format!("<x:xmpmeta xmlns:x='adobe:ns:meta/'>{}</x:xmpmeta>", SECRET);
+        write_objects(
+            path,
+            &[
+                "<< /Type /Catalog /Pages 2 0 R >>".into(),
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 64 64] /Metadata 6 0 R /Resources << /XObject << /Im0 5 0 R >> >> /Contents 7 0 R >>".into(),
+                b"<< /Title (Report) >>".to_vec(),
+                stream(
+                    "/Type /XObject /Subtype /Image /Width 64 /Height 64 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode",
+                    &photo,
+                ),
+                stream("/Type /Metadata /Subtype /XML", xmp.as_bytes()),
+                stream("/Metadata 6 0 R", DRAW_PHOTO),
+            ],
+        );
+    }
+
+    fn write_objects(path: &Path, objects: &[Vec<u8>]) {
         let mut pdf = b"%PDF-1.4\n".to_vec();
         let mut offsets = Vec::new();
         for (i, body) in objects.iter().enumerate() {
             offsets.push(pdf.len());
-            pdf.extend(format!("{} 0 obj\n{}\nendobj\n", i + 1, body).as_bytes());
+            pdf.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+            pdf.extend(body);
+            pdf.extend(b"\nendobj\n");
         }
         let xref = pdf.len();
         pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
@@ -886,6 +1095,59 @@ mod tests {
             old
         );
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn photos_placed_in_a_pdf_are_shown_and_cleaned() {
+        let dir = scratch("pdf-photo");
+        let original = dir.join("report.pdf");
+        write_pdf_with_photo(&original);
+        let before = removable(&original);
+        for key in ["Model", "GPSLatitude", "DateTimeOriginal", "Artist"] {
+            assert!(
+                before.contains(&key.to_string()),
+                "{} not shown: {:?}",
+                key,
+                before
+            );
+        }
+
+        let result = wrapper()
+            .clean_metadata(original.to_str().unwrap(), false, false, false, false)
+            .unwrap();
+
+        assert!(result.success, "{}", result.message);
+        let copy = Path::new(&result.output_path);
+        assert!(removable(copy).is_empty(), "left {:?}", removable(copy));
+        assert!(!contains_secret(copy));
+        let bytes = std::fs::read(copy).unwrap();
+        assert!(!bytes.windows(6).any(|w| w == b"iPhone"));
+        assert_eq!(
+            fields(copy).get("EmbeddedImageWidth").map(String::as_str),
+            Some("64")
+        );
+        let pages = Command::new(&wrapper().qpdf_path)
+            .args(["--show-pages", "--with-images"])
+            .arg(copy)
+            .output()
+            .unwrap();
+        let pages = String::from_utf8_lossy(&pages.stdout);
+        assert!(pages.contains("/Im0"), "{}", pages);
+        let content = pages
+            .lines()
+            .skip_while(|line| !line.contains("content:"))
+            .nth(1)
+            .and_then(|line| line.trim().split(' ').next())
+            .unwrap()
+            .to_string();
+        let drawn = Command::new(&wrapper().qpdf_path)
+            .arg(format!("--show-object={}", content))
+            .arg("--filtered-stream-data")
+            .arg(copy)
+            .output()
+            .unwrap();
+        assert_eq!(drawn.stdout, DRAW_PHOTO);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
     }
 
     // The macOS QPDF build cannot decrypt RC4 until upstream ships the OpenSSL

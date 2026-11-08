@@ -171,7 +171,7 @@ Below is a summary of what to realistically expect:
 | **JPEG** | Most metadata blocks (APP segments) and trailers | Adobe APP14 segment | Typically results in a near-total clean. |
 | **TIFF** | XMP, IPTC, ICC profile, EXIF IFD | Some EXIF stored in IFD0 | Cleaning may require manually targeting specific fields. |
 | **PNG** | XMP, EXIF, ICC profile, standard text chunks | Non-standard chunks | PNG can contain custom metadata chunks that are not standardized. |
-| **PDF** | XMP, document information and the earlier revisions that still hold them | Metadata inside embedded images or attachments | MetadataZero rebuilds the file with QPDF after ExifTool, so removed values cannot be restored. |
+| **PDF** | XMP, document information, EXIF and GPS of embedded JPEG photos, and the earlier revisions that still hold them | Attachments and metadata inside non-JPEG images | MetadataZero rebuilds the file with QPDF after ExifTool, so removed values cannot be restored. |
 | **MOV / MP4** | Most top-level metadata atoms | Embedded or proprietary metadata | Some camera manufacturers store extra metadata blocks in non-standard locations. |
 | **RAW Formats (CR2, NEF, ARW, etc.)** | Standard metadata blocks | **Proprietary camera-specific data** (often required for proper rendering) | Removing everything can break color interpretation, thumbnails, etc. |
 
