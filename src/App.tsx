@@ -92,7 +92,7 @@ function App() {
   const [dragActive, setDragActive] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'none' | 'downloading' | 'ready'>('none');
-  const [versions, setVersions] = useState({ app: '', exiftool: '' });
+  const [version, setVersion] = useState('');
   const [updatesSupported, setUpdatesSupported] = useState(false);
   const [preservationOptions, setPreservationOptions] = useState<PreservationOptions>(() =>
     loadJson('preservationOptions', { orientation: false, colorProfile: false, modificationDate: false }));
@@ -115,9 +115,7 @@ function App() {
   }, [saveMode]);
 
   useEffect(() => {
-    Promise.all([getVersion(), invoke<string>("exiftool_version")])
-      .then(([app, exiftool]) => setVersions({ app, exiftool }))
-      .catch((error) => console.error('Failed to read versions:', error));
+    getVersion().then(setVersion).catch((error) => console.error('Failed to read the version:', error));
     invoke<boolean>("updates_supported").then(setUpdatesSupported);
   }, []);
 
@@ -390,7 +388,7 @@ function App() {
           autoUpdate={updatesSupported ? autoUpdate === true : null}
           onAutoUpdate={setAutoUpdate}
           exampleName={copyName(selected?.name ?? 'name.jpg')}
-          versions={versions}
+          version={version}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -600,7 +598,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: (on: boolean) 
 }
 
 function SettingsSheet({
-  preservation, onPreservation, saveMode, onSaveMode, autoUpdate, onAutoUpdate, exampleName, versions, onClose,
+  preservation, onPreservation, saveMode, onSaveMode, autoUpdate, onAutoUpdate, exampleName, version, onClose,
 }: {
   preservation: PreservationOptions;
   onPreservation: (options: PreservationOptions) => void;
@@ -609,7 +607,7 @@ function SettingsSheet({
   autoUpdate: boolean | null;
   onAutoUpdate: (on: boolean) => void;
   exampleName: string;
-  versions: { app: string; exiftool: string };
+  version: string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -682,7 +680,7 @@ function SettingsSheet({
         )}
 
         <p className="sheet-foot">
-          MetadataZero {versions.app}{versions.exiftool && ` · ExifTool ${versions.exiftool}`}
+          MetadataZero {version}
         </p>
       </div>
     </div>

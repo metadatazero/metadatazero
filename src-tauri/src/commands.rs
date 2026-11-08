@@ -45,11 +45,6 @@ pub fn updates_supported() -> bool {
     )
 }
 
-#[tauri::command]
-pub async fn exiftool_version(exiftool: State<'_, ExifToolWrapper>) -> Result<String, String> {
-    exiftool.version()
-}
-
 #[derive(Serialize)]
 pub struct ReadOutcome {
     file_path: String,
