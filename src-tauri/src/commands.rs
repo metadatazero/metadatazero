@@ -5,6 +5,12 @@ use tauri::State;
 use walkdir::WalkDir;
 
 fn is_supported_file(path: &Path) -> bool {
+    // macOS writes a ._ file next to each file it copies to a FAT or exFAT drive or
+    // a network share. It holds Finder data, not the photo.
+    if path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("._")) {
+        return false;
+    }
+
     const SUPPORTED_EXTENSIONS: &[&str] = &[
         "3g2", "3gp2", "3gp", "3gpp", "aax", "ai", "ait", "arq", "arw", "avif", "cr2", "cr3",
         "crm", "crw", "ciff", "cs1", "dcp", "dng", "dr4", "dvb", "eps", "epsf", "ps", "erf", "exv",
