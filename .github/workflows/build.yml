@@ -12,7 +12,6 @@ permissions:
 jobs:
   build:
     strategy:
-      fail-fast: false
       matrix:
         # Every target builds on a runner of its own architecture. PAR::Packer
         # embeds a native perl interpreter, so ExifTool cannot be cross-packed,
@@ -38,22 +37,25 @@ jobs:
 
     name: ${{ matrix.family }}-${{ matrix.arch }}
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: read
+      actions: write
 
     env:
       BUNDLE_DIR: src-tauri/target/release/bundle
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: 'npm'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
 
@@ -84,22 +86,31 @@ jobs:
           echo "PERL5LIB=$HOME/perl5/lib/perl5" >> "$GITHUB_ENV"
 
       - name: Cache cargo registry
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/registry
           key: ${{ matrix.family }}-${{ matrix.arch }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo index
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/git
           key: ${{ matrix.family }}-${{ matrix.arch }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: src-tauri/target
           key: ${{ matrix.family }}-${{ matrix.arch }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      # The download scripts skip tools that are already in place, so a hit avoids
+      # fetching them from GitHub, which drops anonymous downloads when it is busy.
+      - name: Restore ExifTool and QPDF
+        id: tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/binaries
+          key: ${{ matrix.family }}-${{ matrix.arch }}-tools-${{ hashFiles('tools.json', 'scripts/download-exiftool.ts', 'scripts/download-qpdf.ts', 'scripts/pack-exiftool.ts') }}
 
       - name: Install frontend dependencies
         run: npm install
@@ -107,6 +118,15 @@ jobs:
       - name: Pack ExifTool into a self-contained binary
         if: matrix.family != 'win'
         run: node scripts/pack-exiftool.ts
+
+      # Saved right away rather than at the end of the job, which a failure in
+      # another job cancels.
+      - name: Save ExifTool and QPDF
+        if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/binaries
+          key: ${{ steps.tools.outputs.cache-primary-key }}
 
       # The cache above can restore bundles from an earlier version, which would
       # make the rename step ambiguous.
@@ -127,35 +147,43 @@ jobs:
         run: node scripts/generate-updater-json.ts ${{ env.BUNDLE_DIR }} ${{ matrix.family }} ${{ matrix.arch }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.family }}-${{ matrix.arch }}-artifacts
           path: ${{ env.BUNDLE_DIR }}/*/MetadataZero-*-${{ matrix.family }}-${{ matrix.arch }}.*
 
       - name: Upload latest.json
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: latest-json-${{ matrix.family }}-${{ matrix.arch }}
           path: ${{ env.BUNDLE_DIR }}/latest.json
+
+      # A release needs every package, so one failure makes the other jobs useless.
+      - name: Cancel the run
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
 
   flatpak:
     name: flatpak-x64
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: 'npm'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
 
@@ -177,6 +205,13 @@ jobs:
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive flathub org.gnome.Platform//51 org.gnome.Sdk//51
 
+      - name: Restore ExifTool and QPDF
+        id: tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/binaries
+          key: flatpak-tools-${{ hashFiles('tools.json', 'scripts/download-exiftool.ts', 'scripts/download-qpdf.ts', 'scripts/pack-exiftool.ts') }}
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -184,6 +219,13 @@ jobs:
       # inside the sandbox. This step is what makes the Flatpak work at all.
       - name: Pack ExifTool into a self-contained binary
         run: node scripts/pack-exiftool.ts
+
+      - name: Save ExifTool and QPDF
+        if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/binaries
+          key: ${{ steps.tools.outputs.cache-primary-key }}
 
       # A plain cargo build would load the frontend from the dev server.
       - name: Build Tauri app
@@ -218,10 +260,16 @@ jobs:
           upload-artifact: false
 
       - name: Upload Flatpak artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flatpak-bundle
           path: MetadataZero-${{ steps.version.outputs.version }}-linux-x64.flatpak
+
+      - name: Cancel the run
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} -R ${{ github.repository }}
 
   release:
     needs: [build, flatpak]
@@ -232,10 +280,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
@@ -246,7 +294,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
@@ -254,7 +302,7 @@ jobs:
         run: node scripts/combine-updater-json.ts
 
       - name: Create Release
-        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: |
             artifacts/*-artifacts/**/*
