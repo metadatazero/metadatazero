@@ -57,8 +57,13 @@ pub async fn read_files_metadata(
     file_paths: Vec<String>,
     exiftool: State<'_, ExifToolWrapper>,
 ) -> Result<Vec<ReadOutcome>, String> {
-    Ok(exiftool
-        .read_many(&file_paths)
+    let exiftool = exiftool.inner().clone();
+    let (results, file_paths) = tauri::async_runtime::spawn_blocking(move || {
+        (exiftool.read_many(&file_paths), file_paths)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(results
         .into_iter()
         .zip(file_paths)
         .map(|(result, file_path)| match result {
@@ -85,13 +90,18 @@ pub async fn clean_file_metadata(
     preserve_modification_date: bool,
     exiftool: State<'_, ExifToolWrapper>,
 ) -> Result<CleanResult, String> {
-    exiftool.clean_metadata(
-        &file_path,
-        overwrite,
-        preserve_orientation,
-        preserve_color_profile,
-        preserve_modification_date,
-    )
+    let exiftool = exiftool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        exiftool.clean_metadata(
+            &file_path,
+            overwrite,
+            preserve_orientation,
+            preserve_color_profile,
+            preserve_modification_date,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

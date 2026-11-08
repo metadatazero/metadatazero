@@ -21,6 +21,7 @@ pub struct CleanResult {
     pub message: String,
 }
 
+#[derive(Clone)]
 pub struct ExifToolWrapper {
     exiftool_path: PathBuf,
     qpdf_path: PathBuf,
