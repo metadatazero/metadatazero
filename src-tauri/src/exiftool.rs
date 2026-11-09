@@ -77,6 +77,18 @@ fn binary_paths(binaries: &Path) -> Result<(PathBuf, PathBuf), String> {
     ))
 }
 
+fn tool(path: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 // A copy must stay as private as the file it was made from.
 fn copy_permissions(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::metadata(from)
@@ -294,12 +306,9 @@ impl ExifToolWrapper {
     fn exiftool(&self, args: &[String]) -> Result<Output, String> {
         let fail = |e: std::io::Error| format!("Failed to execute exiftool: {}", e);
         if cfg!(not(target_os = "windows")) {
-            return Command::new(&self.exiftool_path)
-                .args(args)
-                .output()
-                .map_err(fail);
+            return tool(&self.exiftool_path).args(args).output().map_err(fail);
         }
-        let mut child = Command::new(&self.exiftool_path)
+        let mut child = tool(&self.exiftool_path)
             .args(["-charset", "filename=utf8", "-@", "-"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -325,7 +334,7 @@ impl ExifToolWrapper {
     // QPDF exits with 3 when it succeeds with warnings, which damaged but readable
     // PDFs often trigger.
     fn qpdf(&self, args: &[std::ffi::OsString]) -> Result<(), String> {
-        let result = Command::new(&self.qpdf_path)
+        let result = tool(&self.qpdf_path)
             .args(args)
             .output()
             .map_err(|e| format!("Failed to execute qpdf: {}", e))?;
