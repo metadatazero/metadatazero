@@ -1,6 +1,6 @@
 [package]
 name = "metadatazero"
-version = "1.0.0"
+version = "1.1.0"
 description = "Remove metadata from your photos and documents"
 edition = "2021"
 rust-version = "1.83"
